@@ -14,6 +14,9 @@
     "prisma:migrate": "npm run prisma:migrate -w server",
     "prisma:seed": "npm run prisma:seed -w server"
   },
+  "prisma": {
+    "seed": "npm run prisma:seed"
+  },
   "devDependencies": {
     "concurrently": "^9.0.1"
   }
