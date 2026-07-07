@@ -15,7 +15,7 @@
     "prisma:seed": "npm run prisma:seed -w server"
   },
   "prisma": {
-    "seed": "npm run prisma:seed"
+    "seed": "node server/prisma/seed.mjs"
   },
   "devDependencies": {
     "concurrently": "^9.0.1"
