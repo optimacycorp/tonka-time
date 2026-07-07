@@ -22,6 +22,8 @@ RUN npm install --omit=dev
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/client/dist ./client/dist
 COPY --from=builder /app/server/prisma ./server/prisma
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 
 EXPOSE 3000
 CMD ["npm", "run", "start", "-w", "server"]
