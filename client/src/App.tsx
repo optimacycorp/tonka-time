@@ -40,6 +40,9 @@ const faqs = [
   ["Can I use the excavator on steep slopes?", "No. The MVP site explicitly warns against steep slopes, unstable ground, or public ROW work without permits."],
 ];
 
+const heroGraphic = "/images/tonka-hero-landscape.png";
+const promoPoster = "/images/tonka-promo-poster.png";
+
 function currency(cents: number) {
   return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100);
 }
@@ -49,8 +52,12 @@ function Shell({ children }: { children: React.ReactNode }) {
     <div className="min-h-screen bg-sky text-slate-900">
       <header className="sticky top-0 z-30 border-b border-black/5 bg-sky/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <NavLink to="/" className="font-display text-2xl font-bold text-soil">
-            Tonka Time Rentals
+          <NavLink to="/" className="flex items-center gap-3">
+            <img src={heroGraphic} alt="Tonka Time Rentals branding" className="h-12 w-16 rounded-2xl object-cover object-left shadow-card" />
+            <div>
+              <p className="font-display text-2xl font-bold text-soil">Tonka Time Rentals</p>
+              <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Weekend mini excavator rentals</p>
+            </div>
           </NavLink>
           <nav className="hidden gap-5 text-sm font-medium md:flex">
             {[
@@ -84,16 +91,16 @@ function HomePage() {
       <main>
         <section className="relative overflow-hidden">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,_rgba(223,107,55,0.24),_transparent_35%),linear-gradient(135deg,_#f6ead5_0%,_#f5f1e8_58%,_#d8e4cf_100%)]" />
-          <div className="relative mx-auto grid max-w-6xl gap-10 px-6 py-20 md:grid-cols-[1.2fr_0.8fr]">
+          <div className="relative mx-auto grid max-w-6xl gap-10 px-6 py-16 lg:grid-cols-[0.92fr_1.08fr] lg:items-center">
             <div>
               <p className="mb-4 inline-flex rounded-full bg-white/70 px-4 py-2 text-xs font-semibold uppercase tracking-[0.2em] text-field shadow-card">
                 Weekend-only rentals for homeowners
               </p>
-              <h1 className="max-w-3xl font-display text-5xl font-bold leading-none text-soil md:text-7xl">
-                Weekend Mini Excavator Rentals for DIY Homeowners
+              <h1 className="max-w-3xl font-display text-5xl font-bold leading-none text-soil md:text-6xl">
+                DIY-friendly mini excavator weekends for real backyard projects
               </h1>
               <p className="mt-6 max-w-2xl text-lg text-slate-700">
-                Delivered Friday. Picked up Monday. Compact 1.8-ton machine with hydraulic thumb, backyard-friendly sizing, and a quick tutorial to help you start safely.
+                Delivered Friday. Picked up Monday. Compact 1.8-ton machine with hydraulic thumb, homeowner safety checklist, and quick-start support for projects across El Paso County.
               </p>
               <div className="mt-8 flex flex-wrap gap-4">
                 <NavLink className="rounded-full bg-soil px-6 py-3 font-semibold text-white transition hover:bg-field" to="/reserve/package">
@@ -111,21 +118,22 @@ function HomePage() {
                 ))}
               </div>
             </div>
-            <div className="rounded-[2rem] border border-white/60 bg-white/80 p-6 shadow-card">
-              <div className="rounded-[1.5rem] bg-[linear-gradient(180deg,_#d9c3a7_0%,_#8b5a36_100%)] p-6 text-white">
-                <p className="text-sm uppercase tracking-[0.2em] text-white/70">Weekend package</p>
-                <h2 className="mt-2 font-display text-3xl font-bold">1.8-ton compact excavator</h2>
-                <ul className="mt-6 space-y-3 text-sm text-white/90">
-                  <li>Expandable tracks for tighter access</li>
-                  <li>Hydraulic thumb for cleanup and material control</li>
-                  <li>Fence lines, drainage, culverts, landscaping</li>
-                  <li>Starting at {currency(59500)} plus delivery and deposit</li>
-                </ul>
-              </div>
-              <div className="mt-5 rounded-[1.5rem] bg-field p-5 text-white">
-                <p className="text-xs uppercase tracking-[0.2em] text-white/70">Service area</p>
-                <p className="mt-2 text-lg font-semibold">Colorado Springs and El Paso County</p>
-                <p className="mt-2 text-sm text-white/80">Extended delivery is available with additional review and fees.</p>
+            <div className="relative">
+              <div className="absolute -inset-4 rounded-[2.5rem] bg-[linear-gradient(135deg,_rgba(223,107,55,0.18),_rgba(41,69,52,0.15))] blur-2xl" />
+              <div className="relative overflow-hidden rounded-[2rem] border border-white/60 bg-white/90 p-3 shadow-card">
+                <img src={heroGraphic} alt="Tonka Time Rentals weekend mini excavator hero graphic" className="w-full rounded-[1.5rem] object-cover" />
+                <div className="grid gap-3 p-4 md:grid-cols-3">
+                  {[
+                    ["Weekend package", `Starting at ${currency(59500)}`],
+                    ["Service area", "Colorado Springs and El Paso County"],
+                    ["Included", "Quick tutorial plus safety checklist"],
+                  ].map(([label, value]) => (
+                    <div key={label} className="rounded-2xl bg-slate-950 px-4 py-4 text-white">
+                      <p className="text-xs uppercase tracking-[0.18em] text-white/60">{label}</p>
+                      <p className="mt-2 text-sm font-semibold leading-6">{value}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>
@@ -172,7 +180,19 @@ function SimplePage({
 function WeekendRentalsPage() {
   return (
     <SimplePage title="Weekend Mini Excavator Rentals" intro="Tonka Time Rentals is built around one clear MVP package: a Friday delivery and Monday pickup for homeowners tackling practical digging projects.">
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
+        <div className="overflow-hidden rounded-[1.75rem] border border-black/5 bg-white shadow-card">
+          <img src={promoPoster} alt="Tonka Time Rentals branded weekend mini excavator poster" className="h-full w-full object-cover" />
+        </div>
+        <div className="grid gap-6">
+          <div className="rounded-[1.75rem] bg-slate-950 p-6 text-white shadow-card">
+            <p className="text-sm uppercase tracking-[0.2em] text-white/60">What you get</p>
+            <h2 className="mt-2 font-display text-3xl">A homeowner-ready weekend package</h2>
+            <p className="mt-4 text-white/80">
+              The same branded offer shown in your graphic is now part of the site experience: delivery availability, hydraulic thumb support, homeowner-friendly positioning, and clear reserve-online calls to action.
+            </p>
+          </div>
+          <div className="grid gap-6 md:grid-cols-2">
         <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
           <h2 className="font-display text-2xl text-soil">Good fit projects</h2>
           <ul className="mt-4 space-y-2 text-slate-700">
@@ -192,6 +212,8 @@ function WeekendRentalsPage() {
             <li>Deep trenching without a safety plan</li>
             <li>Work near utilities without proper locates</li>
           </ul>
+        </div>
+          </div>
         </div>
       </div>
     </SimplePage>
