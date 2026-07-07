@@ -1,0 +1,258 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Reservation {
+  id                      String             @id @default(cuid())
+  publicId                String             @unique
+  status                  ReservationStatus  @default(DRAFT)
+  packageId               String?
+  machineId               String?
+  weekendStartDate        DateTime
+  weekendEndDate          DateTime
+  firstName               String
+  lastName                String
+  email                   String
+  phone                   String
+  jobsiteStreet           String
+  jobsiteCity             String
+  jobsiteState            String
+  jobsiteZip              String
+  gateAccessNotes         String?
+  surfaceAccessNotes      String?
+  workDescription         String?
+  isPropertyOwner         Boolean?
+  ownerPermission         Boolean?
+  deliveryZone            DeliveryZone       @default(MANUAL_REVIEW)
+  deliveryFeeCents        Int                @default(0)
+  extendedFeeCents        Int                @default(0)
+  colorado811Ticket       String?
+  colorado811Date         DateTime?
+  checklistCompleted      Boolean            @default(false)
+  checklistJson           Json?
+  damageWaiverChoice      DamageWaiverChoice @default(UNDECIDED)
+  damageWaiverFeeCents    Int                @default(0)
+  rentalSubtotalCents     Int                @default(0)
+  taxCents                Int                @default(0)
+  depositCents            Int                @default(0)
+  totalDueCents           Int                @default(0)
+  stripeCheckoutSessionId String?
+  stripePaymentIntentId   String?
+  paymentStatus           PaymentStatus      @default(NOT_STARTED)
+  docusealSubmissionId    String?
+  docusealStatus          DocuSealStatus     @default(NOT_CREATED)
+  signedDocumentUrl       String?
+  adminNotes              String?
+  customerNotes           String?
+  internalFlags           Json?
+  holdExpiresAt           DateTime?
+  confirmedAt             DateTime?
+  cancelledAt             DateTime?
+  createdAt               DateTime           @default(now())
+  updatedAt               DateTime           @updatedAt
+
+  @@index([weekendStartDate, status])
+  @@index([email])
+  @@index([paymentStatus])
+  @@index([docusealStatus])
+}
+
+model RentalPackage {
+  id                  String   @id @default(cuid())
+  name                String
+  slug                String   @unique
+  description         String?
+  weekendPriceCents   Int
+  defaultDepositCents Int
+  damageWaiverCents   Int
+  baseDeliveryCents   Int
+  active              Boolean  @default(true)
+  displayOrder        Int      @default(0)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model Machine {
+  id           String        @id @default(cuid())
+  name         String
+  unitNumber   String        @unique
+  serialNumber String?
+  status       MachineStatus @default(ACTIVE)
+  description  String?
+  hourMeter    Decimal?
+  notes        String?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+model MaintenanceBlock {
+  id        String   @id @default(cuid())
+  machineId String?
+  startDate DateTime
+  endDate   DateTime
+  reason    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AdminDateBlock {
+  id        String   @id @default(cuid())
+  startDate DateTime
+  endDate   DateTime
+  reason    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Inspection {
+  id               String         @id @default(cuid())
+  reservationId    String
+  machineId        String?
+  type             InspectionType
+  hourMeter        Decimal?
+  fuelLevel        String?
+  conditionJson    Json?
+  notes            String?
+  signedByCustomer Boolean        @default(false)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+}
+
+model SitePhoto {
+  id            String     @id @default(cuid())
+  reservationId String
+  url           String
+  caption       String?
+  uploadedBy    UploadedBy
+  createdAt     DateTime   @default(now())
+}
+
+model TutorialVideo {
+  id              String   @id @default(cuid())
+  title           String
+  slug            String   @unique
+  description     String?
+  category        String
+  videoUrl        String
+  thumbnailUrl    String?
+  durationSeconds Int?
+  isPublic        Boolean  @default(true)
+  displayOrder    Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}
+
+model FaqItem {
+  id           String   @id @default(cuid())
+  category     String
+  question     String
+  answer       String
+  isPublic     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model ServiceArea {
+  id               String       @id @default(cuid())
+  label            String
+  city             String?
+  zip              String?
+  zone             DeliveryZone
+  baseFeeCents     Int          @default(0)
+  extendedFeeCents Int          @default(0)
+  active           Boolean      @default(true)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+}
+
+model SiteSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model WebhookEvent {
+  id              String          @id @default(cuid())
+  provider        WebhookProvider
+  providerEventId String?
+  reservationId   String?
+  eventType       String
+  payload         Json
+  processedAt     DateTime?
+  createdAt       DateTime        @default(now())
+
+  @@index([provider, providerEventId])
+}
+
+enum ReservationStatus {
+  DRAFT
+  PENDING_PAYMENT
+  PAYMENT_RECEIVED
+  AWAITING_SIGNATURE
+  AWAITING_ADMIN_REVIEW
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+  EXPIRED
+}
+
+enum PaymentStatus {
+  NOT_STARTED
+  CHECKOUT_CREATED
+  PAID
+  FAILED
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+enum DocuSealStatus {
+  NOT_CREATED
+  SUBMISSION_CREATED
+  SENT
+  OPENED
+  COMPLETED
+  DECLINED
+  ERROR
+}
+
+enum MachineStatus {
+  ACTIVE
+  MAINTENANCE
+  BLOCKED
+  RETIRED
+}
+
+enum DamageWaiverChoice {
+  UNDECIDED
+  ACCEPTED
+  DECLINED
+}
+
+enum DeliveryZone {
+  CORE
+  EXTENDED
+  MANUAL_REVIEW
+}
+
+enum InspectionType {
+  OUTBOUND
+  RETURN
+}
+
+enum UploadedBy {
+  CUSTOMER
+  ADMIN
+}
+
+enum WebhookProvider {
+  STRIPE
+  DOCUSEAL
+}
