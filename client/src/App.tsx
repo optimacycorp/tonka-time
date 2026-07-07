@@ -56,6 +56,10 @@ type AvailabilityResponse = {
   reason: string | null;
 };
 
+type FridayOption = AvailabilityResponse & {
+  label: string;
+};
+
 const heroGraphic = "/images/tonka-hero-landscape.png";
 const promoPoster = "/images/tonka-promo-poster.png";
 const draftStorageKey = "tonka-time-reservation-draft";
@@ -439,7 +443,8 @@ function ReservationFlow() {
   });
   const [availability, setAvailability] = useState<AvailabilityResponse | null>(null);
   const [availabilityMessage, setAvailabilityMessage] = useState("");
-  const [availabilityLoading, setAvailabilityLoading] = useState(false);
+  const [fridayOptions, setFridayOptions] = useState<FridayOption[]>([]);
+  const [fridayOptionsLoading, setFridayOptionsLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [reservationSummary, setReservationSummary] = useState<ReservationSummary | null>(null);
@@ -460,6 +465,16 @@ function ReservationFlow() {
     }
   }, [location.pathname, draft.publicId]);
 
+  useEffect(() => {
+    if (location.pathname === "/reserve/date") {
+      void loadFridayOptions();
+      return;
+    }
+
+    setFridayOptions([]);
+    setFridayOptionsLoading(false);
+  }, [location.pathname]);
+
   const pricing = useMemo(() => {
     const deliveryFeeCents = draft.deliveryZone === "CORE" ? 10000 : 15000;
     const damageWaiverFeeCents = draft.damageWaiverChoice === "ACCEPTED" ? 7500 : 0;
@@ -474,25 +489,49 @@ function ReservationFlow() {
     };
   }, [draft.deliveryZone, draft.damageWaiverChoice]);
 
-  async function checkAvailability(startDate: string) {
-    if (!startDate) {
-      setAvailability(null);
-      setAvailabilityMessage("");
-      return;
-    }
+  async function loadFridayOptions() {
+    const upcomingFridays = getUpcomingFridays(10);
+    setFridayOptionsLoading(true);
 
-    setAvailabilityLoading(true);
-    setAvailabilityMessage("");
     try {
-      const data = await requestJson<AvailabilityResponse>(`/api/availability?startDate=${startDate}`);
-      setAvailability(data);
-      setAvailabilityMessage(data.available ? `${data.availableMachineCount} machine(s) are available for this weekend.` : data.reason ?? "This weekend is unavailable.");
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Could not check availability.";
-      setAvailability(null);
-      setAvailabilityMessage(message);
+      const results = await Promise.all(
+        upcomingFridays.map(async (startDate) => {
+          try {
+            const data = await requestJson<AvailabilityResponse>(`/api/availability?startDate=${startDate}`);
+            return {
+              ...data,
+              label: formatFridayLabel(data.weekendStartDate),
+            };
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Could not check availability.";
+            return {
+              weekendStartDate: startDate,
+              weekendEndDate: getWeekendEnd(startDate),
+              available: false,
+              availableMachineCount: 0,
+              reason: message,
+              label: formatFridayLabel(startDate),
+            } satisfies FridayOption;
+          }
+        }),
+      );
+
+      setFridayOptions(results);
+
+      const selected = results.find((option) => option.weekendStartDate === draft.weekendStartDate) ?? null;
+      if (selected) {
+        setAvailability(selected);
+        setAvailabilityMessage(selected.available ? `${selected.availableMachineCount} machine(s) are available for this weekend.` : selected.reason ?? "This weekend is unavailable.");
+        if (!selected.available) {
+          setDraft((current) => ({ ...current, weekendStartDate: "" }));
+        }
+      } else if (!draft.weekendStartDate) {
+        const firstAvailable = results.find((option) => option.available) ?? null;
+        setAvailability(firstAvailable);
+        setAvailabilityMessage(firstAvailable ? `${firstAvailable.availableMachineCount} machine(s) are available for this weekend.` : "No Friday weekends are currently available.");
+      }
     } finally {
-      setAvailabilityLoading(false);
+      setFridayOptionsLoading(false);
     }
   }
 
@@ -573,16 +612,29 @@ function ReservationFlow() {
     }));
   }
 
+  function selectFridayOption(option: FridayOption) {
+    if (!option.available) {
+      return;
+    }
+
+    updateField("weekendStartDate", option.weekendStartDate);
+    setAvailability(option);
+    setAvailabilityMessage(`${option.availableMachineCount} machine(s) are available for this weekend.`);
+    setErrorMessage("");
+  }
+
+  const selectedFridayAvailability = fridayOptions.find((option) => option.weekendStartDate === draft.weekendStartDate) ?? availability;
+
   function validateCurrentStep() {
     switch (location.pathname) {
       case "/reserve/package":
         return true;
       case "/reserve/date":
         if (!draft.weekendStartDate) {
-          setErrorMessage("Choose a Friday start date to continue.");
+          setErrorMessage("Choose one of the available Friday weekends to continue.");
           return false;
         }
-        if (!availability?.available) {
+        if (!selectedFridayAvailability?.available) {
           setErrorMessage("Select an available Friday weekend before continuing.");
           return false;
         }
@@ -722,28 +774,47 @@ function ReservationFlow() {
             <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 2</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Choose your Friday weekend</h2>
-              <label className="mt-6 block">
-                <span className="text-sm font-semibold text-slate-700">Friday start date</span>
-                <input
-                  className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3"
-                  type="date"
-                  value={draft.weekendStartDate}
-                  onChange={(event) => {
-                    updateField("weekendStartDate", event.target.value);
-                    void checkAvailability(event.target.value);
-                  }}
-                />
-              </label>
-              <p className="mt-3 text-sm text-slate-500">Only Friday starts are accepted. The system holds your chosen weekend for 30 minutes once the reservation is saved.</p>
+              <p className="mt-4 text-slate-700">Only Friday start dates can be booked. Unavailable weekends are shown but cannot be selected, and a saved reservation holds inventory for 3 minutes while checkout is completed.</p>
+              <div className="mt-6 grid gap-4 md:grid-cols-2">
+                {fridayOptions.map((option) => {
+                  const selected = draft.weekendStartDate === option.weekendStartDate;
+                  return (
+                    <button
+                      key={option.weekendStartDate}
+                      type="button"
+                      disabled={!option.available}
+                      onClick={() => selectFridayOption(option)}
+                      className={`rounded-[1.5rem] border px-5 py-5 text-left transition ${
+                        selected
+                          ? "border-ember bg-ember text-white"
+                          : option.available
+                            ? "border-slate-200 bg-white hover:border-soil hover:bg-sky"
+                            : "cursor-not-allowed border-slate-200 bg-slate-100 text-slate-400"
+                      }`}
+                    >
+                      <p className="font-display text-2xl">{option.label}</p>
+                      <p className={`mt-2 text-sm ${selected ? "text-white/85" : option.available ? "text-field" : "text-slate-500"}`}>
+                        {option.available ? `${option.availableMachineCount} machine(s) available` : option.reason ?? "Unavailable"}
+                      </p>
+                      <p className={`mt-2 text-sm ${selected ? "text-white/75" : "text-slate-500"}`}>
+                        Weekend ends {formatMondayLabel(option.weekendEndDate)}
+                      </p>
+                    </button>
+                  );
+                })}
+              </div>
+              {fridayOptionsLoading && <p className="mt-4 text-sm text-slate-600">Checking upcoming Fridays...</p>}
               <div className="mt-5 rounded-2xl bg-sky p-4">
-                {availabilityLoading ? (
+                {fridayOptionsLoading ? (
                   <p className="text-sm text-slate-600">Checking availability...</p>
                 ) : (
-                  <p className={`text-sm font-medium ${availability?.available ? "text-field" : "text-soil"}`}>{availabilityMessage || "Choose a Friday date to check availability."}</p>
+                  <p className={`text-sm font-medium ${selectedFridayAvailability?.available ? "text-field" : "text-soil"}`}>
+                    {availabilityMessage || "Choose one of the available Friday weekends to continue."}
+                  </p>
                 )}
-                {availability && (
+                {selectedFridayAvailability && (
                   <p className="mt-2 text-sm text-slate-600">
-                    Weekend: {availability.weekendStartDate} to {availability.weekendEndDate}
+                    Weekend: {selectedFridayAvailability.weekendStartDate} to {selectedFridayAvailability.weekendEndDate}
                   </p>
                 )}
               </div>
@@ -1044,6 +1115,40 @@ function getWeekendEnd(startDate: string) {
   const date = new Date(`${startDate}T00:00:00`);
   date.setDate(date.getDate() + 3);
   return date.toISOString().slice(0, 10);
+}
+
+function getUpcomingFridays(count: number) {
+  const dates: string[] = [];
+  const today = new Date();
+  const cursor = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()));
+
+  while (cursor.getUTCDay() !== 5) {
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+
+  for (let index = 0; index < count; index += 1) {
+    dates.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 7);
+  }
+
+  return dates;
+}
+
+function formatFridayLabel(startDate: string) {
+  return new Date(`${startDate}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
+function formatMondayLabel(endDate: string) {
+  return new Date(`${endDate}T00:00:00`).toLocaleDateString("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+  });
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {

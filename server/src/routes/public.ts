@@ -4,6 +4,9 @@ import { availabilityQuerySchema, reservationCreateSchema, reservationUpdateSche
 import { calculatePricing, classifyDeliveryZone, isFriday, weekendEndDate } from "../lib/reservations.js";
 
 const router = Router();
+const minimumMachineInventory = 2;
+const shortHoldMinutes = 3;
+const reservedStatuses = ["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "AWAITING_ADMIN_REVIEW", "CONFIRMED"] as const;
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
   Promise.resolve(handler(req, res, next)).catch(next);
 };
@@ -21,13 +24,20 @@ router.get("/availability", asyncRoute(async (req, res) => {
 
   const start = new Date(`${startDate}T00:00:00.000Z`);
   const end = new Date(`${weekendEndDate(startDate)}T00:00:00.000Z`);
+  const now = new Date();
 
   const [machines, reservations, blocks] = await Promise.all([
     prisma.machine.count({ where: { status: "ACTIVE" } }),
     prisma.reservation.count({
       where: {
         weekendStartDate: start,
-        status: { in: ["PENDING_PAYMENT", "PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "CONFIRMED"] },
+        OR: [
+          { status: { in: [...reservedStatuses] } },
+          {
+            status: { in: ["DRAFT", "PENDING_PAYMENT"] },
+            holdExpiresAt: { gt: now },
+          },
+        ],
       },
     }),
     prisma.adminDateBlock.count({
@@ -38,7 +48,8 @@ router.get("/availability", asyncRoute(async (req, res) => {
     }),
   ]);
 
-  const availableMachineCount = Math.max(machines - reservations, 0);
+  const machineInventory = Math.max(machines, minimumMachineInventory);
+  const availableMachineCount = Math.max(machineInventory - reservations, 0);
   const available = blocks === 0 && availableMachineCount > 0;
 
   return res.json({
@@ -46,7 +57,7 @@ router.get("/availability", asyncRoute(async (req, res) => {
     weekendEndDate: weekendEndDate(startDate),
     available,
     availableMachineCount,
-    reason: available ? null : blocks > 0 ? "Admin blocked weekend" : "No active machines available",
+    reason: available ? null : blocks > 0 ? "Admin blocked weekend" : "All machines are already reserved or on hold for that Friday.",
   });
 }));
 
@@ -94,7 +105,7 @@ router.post("/reservations", asyncRoute(async (req, res) => {
       depositCents: pricing.depositCents,
       totalDueCents: pricing.totalDueCents,
       colorado811Ticket: parsed.data.colorado811Ticket,
-      holdExpiresAt: new Date(Date.now() + 30 * 60 * 1000),
+      holdExpiresAt: new Date(Date.now() + shortHoldMinutes * 60 * 1000),
     },
   });
 
