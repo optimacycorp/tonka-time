@@ -4,6 +4,7 @@
 
 - App repo: `/home/deploy/apps/tonka-time`
 - Nginx site file: `/etc/nginx/sites-available/tonkatimerentals.conf`
+- Docker app bind: `127.0.0.1:3001 -> container:3000`
 
 ## Domain strategy
 
@@ -40,6 +41,17 @@ bash deploy/bootstrap-racknerd.sh
 ```
 
 That script installs Docker, Docker Compose, Nginx, Certbot, configures the Nginx site, and issues certificates for all four hostnames.
+
+## Port note
+
+The app is intentionally bound to `127.0.0.1:3001` on the server, not host port `3000`.
+
+This avoids conflicts with other services already using `3000` and keeps the Node app private behind Nginx.
+
+If you ever need a different host port, update these two places together:
+
+- `docker-compose.yml`
+- `nginx/tonkatimerentals.conf`
 
 ## Repeatable deploy
 
