@@ -6,13 +6,14 @@ import type { NextFunction, Request, Response } from "express";
 import { env } from "./lib/config.js";
 import publicRoutes from "./routes/public.js";
 import adminRoutes from "./routes/admin.js";
-import stripeRoutes from "./routes/stripe.js";
+import stripeRoutes, { stripeWebhookHandler } from "./routes/stripe.js";
 import docusealRoutes from "./routes/docuseal.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 app.use(cors({ origin: true, credentials: true }));
+app.post("/api/stripe/webhook", express.raw({ type: "application/json" }), stripeWebhookHandler);
 app.use(express.json({ limit: "5mb" }));
 
 app.get("/api/health", (_req, res) => {

@@ -42,6 +42,12 @@ type ReservationSummary = {
   status?: string;
 };
 
+type CheckoutResponse = {
+  checkoutUrl: string;
+  mode: "live" | "placeholder";
+  message: string;
+};
+
 type AvailabilityResponse = {
   weekendStartDate: string;
   weekendEndDate: string;
@@ -438,6 +444,7 @@ function ReservationFlow() {
   const [errorMessage, setErrorMessage] = useState("");
   const [reservationSummary, setReservationSummary] = useState<ReservationSummary | null>(null);
   const [paymentUrl, setPaymentUrl] = useState("");
+  const [checkoutMode, setCheckoutMode] = useState<"live" | "placeholder" | "">("");
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
 
   useEffect(() => {
@@ -531,12 +538,13 @@ function ReservationFlow() {
     }
 
     try {
-      const data = await requestJson<{ checkoutUrl: string }>("/api/stripe/create-checkout-session", {
+      const data = await requestJson<CheckoutResponse>("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reservationPublicId: draft.publicId }),
       });
       setPaymentUrl(data.checkoutUrl);
+      setCheckoutMode(data.mode);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not create checkout session.");
     }
@@ -907,10 +915,15 @@ function ReservationFlow() {
               </p>
               <div className="mt-6 rounded-2xl bg-sky p-5">
                 <p className="text-sm font-medium text-slate-700">Reservation ID: {reservationIdFromUrl ?? "Missing reservation ID"}</p>
-                <p className="mt-2 text-sm text-slate-600">Checkout placeholder URL: {paymentUrl || "Generating..."}</p>
+                <p className="mt-2 text-sm text-slate-600">{checkoutMode === "live" ? "Stripe checkout URL" : "Checkout placeholder URL"}: {paymentUrl || "Generating..."}</p>
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
-                {paymentUrl && (
+                {paymentUrl && checkoutMode === "live" && (
+                  <a href={paymentUrl} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
+                    Open secure checkout
+                  </a>
+                )}
+                {paymentUrl && checkoutMode !== "live" && (
                   <button type="button" onClick={() => navigate(`/reserve/sign?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
                     Continue to signing
                   </button>
