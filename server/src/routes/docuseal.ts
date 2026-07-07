@@ -1,10 +1,13 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 
 const router = Router();
+const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
-router.post("/create-submission", async (req, res) => {
+router.post("/create-submission", asyncRoute(async (req, res) => {
   const parsed = z.object({ reservationPublicId: z.string().min(1) }).safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -29,9 +32,9 @@ router.post("/create-submission", async (req, res) => {
     signingUrl: `/reserve/sign?reservation=${reservation.publicId}`,
     message: "Live DocuSeal submission wiring is scaffolded and ready for API credentials.",
   });
-});
+}));
 
-router.post("/webhook", async (req, res) => {
+router.post("/webhook", asyncRoute(async (req, res) => {
   const parsed = z
     .object({
       event_type: z.string().optional(),
@@ -62,6 +65,6 @@ router.post("/webhook", async (req, res) => {
   }
 
   return res.json({ received: true });
-});
+}));
 
 export default router;

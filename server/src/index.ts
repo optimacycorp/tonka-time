@@ -2,6 +2,7 @@ import express from "express";
 import cors from "cors";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { NextFunction, Request, Response } from "express";
 import { env } from "./lib/config.js";
 import publicRoutes from "./routes/public.js";
 import adminRoutes from "./routes/admin.js";
@@ -22,6 +23,17 @@ app.use("/api", publicRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/stripe", stripeRoutes);
 app.use("/api/docuseal", docusealRoutes);
+
+app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
+  if (!req.path.startsWith("/api")) {
+    next(error);
+    return;
+  }
+
+  const message = error instanceof Error ? error.message : "Unexpected server error";
+  console.error(error);
+  res.status(500).json({ error: message });
+});
 
 const clientDist = path.resolve(__dirname, "../../client/dist");
 app.use(express.static(clientDist));

@@ -1,9 +1,12 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { adminEmails } from "../lib/config.js";
 
 const router = Router();
+const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
 router.use((req, res, next) => {
   const adminEmail = req.header("x-admin-email")?.toLowerCase();
@@ -13,15 +16,15 @@ router.use((req, res, next) => {
   next();
 });
 
-router.get("/reservations", async (_req, res) => {
+router.get("/reservations", asyncRoute(async (_req, res) => {
   const reservations = await prisma.reservation.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
   });
   return res.json(reservations);
-});
+}));
 
-router.patch("/reservations/:id", async (req, res) => {
+router.patch("/reservations/:id", asyncRoute(async (req, res) => {
   const parsed = z
     .object({
       status: z
@@ -37,14 +40,14 @@ router.patch("/reservations/:id", async (req, res) => {
   }
 
   const reservation = await prisma.reservation.update({
-    where: { id: req.params.id },
+    where: { id: String(req.params.id) },
     data: parsed.data,
   });
 
   return res.json(reservation);
-});
+}));
 
-router.post("/block-date", async (req, res) => {
+router.post("/block-date", asyncRoute(async (req, res) => {
   const parsed = z
     .object({
       startDate: z.string(),
@@ -66,9 +69,9 @@ router.post("/block-date", async (req, res) => {
   });
 
   return res.status(201).json(block);
-});
+}));
 
-router.post("/machines/:id/service-block", async (req, res) => {
+router.post("/machines/:id/service-block", asyncRoute(async (req, res) => {
   const parsed = z
     .object({
       startDate: z.string(),
@@ -83,7 +86,7 @@ router.post("/machines/:id/service-block", async (req, res) => {
 
   const block = await prisma.maintenanceBlock.create({
     data: {
-      machineId: req.params.id,
+      machineId: String(req.params.id),
       startDate: new Date(`${parsed.data.startDate}T00:00:00.000Z`),
       endDate: new Date(`${parsed.data.endDate}T00:00:00.000Z`),
       reason: parsed.data.reason,
@@ -91,14 +94,14 @@ router.post("/machines/:id/service-block", async (req, res) => {
   });
 
   return res.status(201).json(block);
-});
+}));
 
-router.post("/uploads/video", async (_req, res) => {
+router.post("/uploads/video", asyncRoute(async (_req, res) => {
   return res.status(501).json({ error: "Connect S3-compatible storage or UploadThing before enabling video uploads." });
-});
+}));
 
-router.post("/uploads/site-photo", async (_req, res) => {
+router.post("/uploads/site-photo", asyncRoute(async (_req, res) => {
   return res.status(501).json({ error: "Site photo uploads are scaffolded but not wired to storage yet." });
-});
+}));
 
 export default router;

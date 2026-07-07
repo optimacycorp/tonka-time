@@ -1,10 +1,13 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 
 const router = Router();
+const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
-router.post("/create-checkout-session", async (req, res) => {
+router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   const parsed = z.object({ reservationPublicId: z.string().min(1) }).safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -29,9 +32,9 @@ router.post("/create-checkout-session", async (req, res) => {
     mode: "placeholder",
     message: "Replace this placeholder with a live Stripe Checkout Session before launch.",
   });
-});
+}));
 
-router.post("/webhook", async (req, res) => {
+router.post("/webhook", asyncRoute(async (req, res) => {
   const eventType = req.body?.type;
   const publicId = req.body?.data?.object?.metadata?.reservationPublicId;
 
@@ -57,6 +60,6 @@ router.post("/webhook", async (req, res) => {
   }
 
   return res.json({ received: true });
-});
+}));
 
 export default router;

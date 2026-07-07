@@ -477,11 +477,7 @@ function ReservationFlow() {
     setAvailabilityLoading(true);
     setAvailabilityMessage("");
     try {
-      const response = await fetch(`/api/availability?startDate=${startDate}`);
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error ?? "Could not check availability.");
-      }
+      const data = await requestJson<AvailabilityResponse>(`/api/availability?startDate=${startDate}`);
       setAvailability(data);
       setAvailabilityMessage(data.available ? `${data.availableMachineCount} machine(s) are available for this weekend.` : data.reason ?? "This weekend is unavailable.");
     } catch (error) {
@@ -515,15 +511,11 @@ function ReservationFlow() {
       checklistCompleted: draft.checklistCompleted,
     };
 
-    const response = await fetch(draft.publicId ? `/api/reservations/${draft.publicId}` : "/api/reservations", {
+    const data = await requestJson<ReservationSummary & { publicId?: string; deliveryZone?: string }>(draft.publicId ? `/api/reservations/${draft.publicId}` : "/api/reservations", {
       method: draft.publicId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    const data = await response.json();
-    if (!response.ok) {
-      throw new Error(typeof data.error === "string" ? data.error : "Could not save reservation.");
-    }
     if (!draft.publicId && data.publicId) {
       setDraft((current) => ({ ...current, publicId: data.publicId, deliveryZone: data.deliveryZone }));
     } else if (data.deliveryZone) {
@@ -539,15 +531,11 @@ function ReservationFlow() {
     }
 
     try {
-      const response = await fetch("/api/stripe/create-checkout-session", {
+      const data = await requestJson<{ checkoutUrl: string }>("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reservationPublicId: draft.publicId }),
       });
-      const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data.error ?? "Could not create checkout session.");
-      }
       setPaymentUrl(data.checkoutUrl);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not create checkout session.");
@@ -555,10 +543,11 @@ function ReservationFlow() {
   }
 
   async function loadReservationSummary(publicId: string) {
-    const response = await fetch(`/api/reservations/${publicId}`);
-    const data = await response.json();
-    if (response.ok) {
+    try {
+      const data = await requestJson<ReservationSummary>(`/api/reservations/${publicId}`);
       setReservationSummary(data);
+    } catch {
+      // Keep existing UI state if the summary endpoint is temporarily unavailable.
     }
   }
 
@@ -1042,6 +1031,31 @@ function getWeekendEnd(startDate: string) {
   const date = new Date(`${startDate}T00:00:00`);
   date.setDate(date.getDate() + 3);
   return date.toISOString().slice(0, 10);
+}
+
+async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
+  const response = await fetch(input, init);
+  const text = await response.text();
+  let data: unknown = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    if (!response.ok) {
+      throw new Error("The server returned an HTML error page. This usually means the reservation tables are missing or the API crashed.");
+    }
+    throw new Error("The server returned an unexpected response.");
+  }
+
+  if (!response.ok) {
+    const message =
+      typeof data === "object" && data !== null && "error" in data && typeof (data as { error?: unknown }).error === "string"
+        ? (data as { error: string }).error
+        : "Request failed.";
+    throw new Error(message);
+  }
+
+  return data as T;
 }
 
 function AdminPage() {

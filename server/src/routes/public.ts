@@ -1,11 +1,14 @@
-import { Router } from "express";
+import { Router, type RequestHandler } from "express";
 import { prisma } from "../lib/prisma.js";
 import { availabilityQuerySchema, reservationCreateSchema, reservationUpdateSchema } from "../lib/schemas.js";
 import { calculatePricing, classifyDeliveryZone, isFriday, weekendEndDate } from "../lib/reservations.js";
 
 const router = Router();
+const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
+  Promise.resolve(handler(req, res, next)).catch(next);
+};
 
-router.get("/availability", async (req, res) => {
+router.get("/availability", asyncRoute(async (req, res) => {
   const parsed = availabilityQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: "Invalid startDate" });
@@ -45,9 +48,9 @@ router.get("/availability", async (req, res) => {
     availableMachineCount,
     reason: available ? null : blocks > 0 ? "Admin blocked weekend" : "No active machines available",
   });
-});
+}));
 
-router.post("/reservations", async (req, res) => {
+router.post("/reservations", asyncRoute(async (req, res) => {
   const parsed = reservationCreateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
@@ -96,23 +99,25 @@ router.post("/reservations", async (req, res) => {
   });
 
   return res.status(201).json(reservation);
-});
+}));
 
-router.get("/reservations/:publicId", async (req, res) => {
-  const reservation = await prisma.reservation.findUnique({ where: { publicId: req.params.publicId } });
+router.get("/reservations/:publicId", asyncRoute(async (req, res) => {
+  const publicId = String(req.params.publicId);
+  const reservation = await prisma.reservation.findUnique({ where: { publicId } });
   if (!reservation) {
     return res.status(404).json({ error: "Reservation not found" });
   }
   return res.json(reservation);
-});
+}));
 
-router.patch("/reservations/:publicId", async (req, res) => {
+router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
   const parsed = reservationUpdateSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: parsed.error.flatten() });
   }
 
-  const existing = await prisma.reservation.findUnique({ where: { publicId: req.params.publicId } });
+  const publicId = String(req.params.publicId);
+  const existing = await prisma.reservation.findUnique({ where: { publicId } });
   if (!existing) {
     return res.status(404).json({ error: "Reservation not found" });
   }
@@ -125,7 +130,7 @@ router.patch("/reservations/:publicId", async (req, res) => {
   });
 
   const updated = await prisma.reservation.update({
-    where: { publicId: req.params.publicId },
+    where: { publicId },
     data: {
       ...parsed.data,
       weekendStartDate: parsed.data.weekendStartDate ? new Date(`${parsed.data.weekendStartDate}T00:00:00.000Z`) : undefined,
@@ -140,7 +145,7 @@ router.patch("/reservations/:publicId", async (req, res) => {
   });
 
   return res.json(updated);
-});
+}));
 
 function nextFriday() {
   const now = new Date();
