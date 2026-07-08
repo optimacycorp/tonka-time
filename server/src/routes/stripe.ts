@@ -12,6 +12,8 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
   Promise.resolve(handler(req, res, next)).catch(next);
 };
 const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
+const minimumMachineInventory = 2;
+const reservedStatuses = ["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "AWAITING_ADMIN_REVIEW", "CONFIRMED"] as const;
 
 router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   const parsed = z.object({ reservationPublicId: z.string().min(1) }).safeParse(req.body);
@@ -25,12 +27,19 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   }
 
   const weekendStart = reservation.weekendStartDate.toISOString().slice(0, 10);
+  const now = new Date();
   const [machines, reservations, blocks] = await Promise.all([
     prisma.machine.count({ where: { status: "ACTIVE" } }),
     prisma.reservation.count({
       where: {
         weekendStartDate: reservation.weekendStartDate,
-        status: { in: ["PENDING_PAYMENT", "PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "CONFIRMED"] },
+        OR: [
+          { status: { in: [...reservedStatuses] } },
+          {
+            status: { in: ["DRAFT", "PENDING_PAYMENT"] },
+            holdExpiresAt: { gt: now },
+          },
+        ],
         NOT: { publicId: reservation.publicId },
       },
     }),
@@ -42,7 +51,7 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
     }),
   ]);
 
-  if (blocks > 0 || machines - reservations <= 0) {
+  if (blocks > 0 || Math.max(machines, minimumMachineInventory) - reservations <= 0) {
     return res.status(409).json({ error: "That weekend is no longer available." });
   }
 
@@ -61,7 +70,7 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
     totalDueCents: pricing.totalDueCents,
   };
 
-  if (!stripe) {
+  if (!stripe || !env.STRIPE_PUBLISHABLE_KEY) {
     const updated = await prisma.reservation.update({
       where: { publicId: reservation.publicId },
       data: {
@@ -79,11 +88,12 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   }
 
   const session = await stripe.checkout.sessions.create({
+    ui_mode: "embedded",
     mode: "payment",
     customer_email: reservation.email,
     currency: env.STRIPE_CURRENCY,
-    success_url: `${env.SITE_URL}/reserve/sign?reservation=${reservation.publicId}&session_id={CHECKOUT_SESSION_ID}`,
-    cancel_url: `${env.SITE_URL}/reserve/review?reservation=${reservation.publicId}`,
+    return_url: `${env.SITE_URL}/reserve/payment?reservation=${reservation.publicId}&session_id={CHECKOUT_SESSION_ID}`,
+    redirect_on_completion: "if_required",
     metadata: {
       reservationId: reservation.id,
       reservationPublicId: reservation.publicId,
@@ -139,9 +149,44 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   });
 
   return res.json({
-    checkoutUrl: session.url,
+    checkoutUrl: session.url ?? null,
+    clientSecret: session.client_secret,
+    publishableKey: env.STRIPE_PUBLISHABLE_KEY,
+    sessionId: session.id,
     mode: "live",
     message: "Stripe Checkout session created.",
+  });
+}));
+
+router.get("/checkout-session-status", asyncRoute(async (req, res) => {
+  const parsed = z.object({ sessionId: z.string().min(1) }).safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Missing sessionId." });
+  }
+
+  if (!stripe) {
+    return res.status(400).json({ error: "Stripe is not configured." });
+  }
+
+  const session = await stripe.checkout.sessions.retrieve(parsed.data.sessionId);
+  const publicId = session.metadata?.reservationPublicId;
+
+  if (session.status === "complete" && publicId) {
+    await prisma.reservation.update({
+      where: { publicId },
+      data: {
+        paymentStatus: session.payment_status === "paid" ? "PAID" : "CHECKOUT_CREATED",
+        status: session.payment_status === "paid" ? "PAYMENT_RECEIVED" : "PENDING_PAYMENT",
+        stripePaymentIntentId: typeof session.payment_intent === "string" ? session.payment_intent : null,
+      },
+    });
+  }
+
+  return res.json({
+    sessionId: session.id,
+    status: session.status,
+    paymentStatus: session.payment_status,
+    reservationPublicId: publicId ?? null,
   });
 }));
 

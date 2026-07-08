@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import { EmbeddedCheckout, EmbeddedCheckoutProvider } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
 import { NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 
 type ReservationDraft = {
@@ -43,9 +45,19 @@ type ReservationSummary = {
 };
 
 type CheckoutResponse = {
-  checkoutUrl: string;
+  checkoutUrl?: string | null;
+  clientSecret?: string | null;
+  publishableKey?: string | null;
+  sessionId?: string | null;
   mode: "live" | "placeholder";
   message: string;
+};
+
+type CheckoutSessionStatusResponse = {
+  sessionId: string;
+  status: "open" | "complete" | "expired" | null;
+  paymentStatus: "paid" | "unpaid" | "no_payment_required" | null;
+  reservationPublicId: string | null;
 };
 
 type AvailabilityResponse = {
@@ -433,6 +445,36 @@ function ContactPage() {
   );
 }
 
+function StripeEmbeddedCheckoutCard({
+  clientSecret,
+  publishableKey,
+  reservationPublicId,
+}: {
+  clientSecret: string;
+  publishableKey: string;
+  reservationPublicId: string;
+}) {
+  const navigate = useNavigate();
+  const stripePromise = useMemo(() => loadStripe(publishableKey), [publishableKey]);
+  const options = useMemo(
+    () => ({
+      clientSecret,
+      onComplete: () => {
+        navigate(`/reserve/sign?reservation=${reservationPublicId}`);
+      },
+    }),
+    [clientSecret, navigate, reservationPublicId],
+  );
+
+  return (
+    <EmbeddedCheckoutProvider key={clientSecret} stripe={stripePromise} options={options}>
+      <div className="overflow-hidden rounded-[1.5rem] border border-black/5 bg-white shadow-card">
+        <EmbeddedCheckout />
+      </div>
+    </EmbeddedCheckoutProvider>
+  );
+}
+
 function ReservationFlow() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -448,8 +490,11 @@ function ReservationFlow() {
   const [saving, setSaving] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const [reservationSummary, setReservationSummary] = useState<ReservationSummary | null>(null);
-  const [paymentUrl, setPaymentUrl] = useState("");
+  const [checkoutClientSecret, setCheckoutClientSecret] = useState("");
+  const [checkoutPublishableKey, setCheckoutPublishableKey] = useState("");
   const [checkoutMode, setCheckoutMode] = useState<"live" | "placeholder" | "">("");
+  const [paymentStatusMessage, setPaymentStatusMessage] = useState("");
+  const [paymentLoading, setPaymentLoading] = useState(false);
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
 
   useEffect(() => {
@@ -457,13 +502,20 @@ function ReservationFlow() {
   }, [draft]);
 
   useEffect(() => {
-    if (location.pathname === "/reserve/payment" && draft.publicId) {
+    if (location.pathname === "/reserve/payment" && draft.publicId && !searchParams.get("session_id")) {
       void createCheckoutSession();
     }
     if ((location.pathname === "/reserve/sign" || location.pathname === "/reserve/confirmation") && draft.publicId) {
       void loadReservationSummary(draft.publicId);
     }
-  }, [location.pathname, draft.publicId]);
+  }, [location.pathname, draft.publicId, searchParams]);
+
+  useEffect(() => {
+    const sessionId = searchParams.get("session_id");
+    if (location.pathname === "/reserve/payment" && sessionId) {
+      void loadCheckoutSessionStatus(sessionId);
+    }
+  }, [location.pathname, searchParams]);
 
   useEffect(() => {
     if (location.pathname === "/reserve/date") {
@@ -572,20 +624,52 @@ function ReservationFlow() {
   }
 
   async function createCheckoutSession() {
-    if (!draft.publicId || paymentUrl) {
+    if (!draft.publicId || checkoutClientSecret || checkoutMode === "placeholder") {
       return;
     }
 
     try {
+      setPaymentLoading(true);
+      setPaymentStatusMessage("");
       const data = await requestJson<CheckoutResponse>("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reservationPublicId: draft.publicId }),
       });
-      setPaymentUrl(data.checkoutUrl);
       setCheckoutMode(data.mode);
+      setPaymentStatusMessage(data.message);
+      if (data.mode === "live" && data.clientSecret && data.publishableKey) {
+        setCheckoutClientSecret(data.clientSecret);
+        setCheckoutPublishableKey(data.publishableKey);
+      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : "Could not create checkout session.");
+    } finally {
+      setPaymentLoading(false);
+    }
+  }
+
+  async function loadCheckoutSessionStatus(sessionId: string) {
+    try {
+      setPaymentLoading(true);
+      const data = await requestJson<CheckoutSessionStatusResponse>(`/api/stripe/checkout-session-status?sessionId=${encodeURIComponent(sessionId)}`);
+      if (data.status === "complete" && data.paymentStatus === "paid") {
+        navigate(`/reserve/sign?reservation=${reservationIdFromUrl ?? draft.publicId}`);
+        return;
+      }
+
+      if (data.status === "open") {
+        setPaymentStatusMessage("Your Stripe session is still open. Finish payment below to continue.");
+        return;
+      }
+
+      if (data.status === "expired") {
+        setPaymentStatusMessage("That payment session expired. Refresh the page to generate a new one.");
+      }
+    } catch (error) {
+      setPaymentStatusMessage(error instanceof Error ? error.message : "Could not load the Stripe session status.");
+    } finally {
+      setPaymentLoading(false);
     }
   }
 
@@ -708,7 +792,10 @@ function ReservationFlow() {
     localStorage.removeItem(draftStorageKey);
     setDraft(defaultDraft);
     setReservationSummary(null);
-    setPaymentUrl("");
+    setCheckoutClientSecret("");
+    setCheckoutPublishableKey("");
+    setCheckoutMode("");
+    setPaymentStatusMessage("");
     navigate("/reserve/package");
   }
 
@@ -970,9 +1057,12 @@ function ReservationFlow() {
                   <div className="flex items-center justify-between"><span>Weekend rental</span><span>{currency(pricing.rentalSubtotalCents)}</span></div>
                   <div className="flex items-center justify-between"><span>Delivery</span><span>{currency(pricing.deliveryFeeCents)}</span></div>
                   <div className="flex items-center justify-between"><span>Damage waiver</span><span>{currency(pricing.damageWaiverFeeCents)}</span></div>
-                  <div className="flex items-center justify-between"><span>Deposit</span><span>{currency(pricing.depositCents)}</span></div>
+                  <div className="flex items-center justify-between"><span>Refundable deposit</span><span>{currency(pricing.depositCents)}</span></div>
                   <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-3 font-semibold"><span>Total due today</span><span>{currency(pricing.totalDueCents)}</span></div>
                 </div>
+                <p className="mt-4 rounded-2xl bg-white/5 px-4 py-3 text-sm text-white/80">
+                  The {currency(pricing.depositCents)} deposit is refunded after satisfactory machine return.
+                </p>
               </div>
             </div>
           )}
@@ -980,21 +1070,51 @@ function ReservationFlow() {
           {location.pathname === "/reserve/payment" && (
             <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 7</p>
-              <h2 className="mt-2 font-display text-3xl text-soil">Payment handoff</h2>
+              <h2 className="mt-2 font-display text-3xl text-soil">Secure payment</h2>
               <p className="mt-4 text-slate-700">
-                This sprint wires the reservation into the backend and the Stripe checkout placeholder. The live Stripe session integration is the next sprint item.
+                Pay without leaving the reservation flow. Stripe handles the secure payment form here on the page, while Tonka Time keeps the pricing and next steps visible beside it.
               </p>
-              <div className="mt-6 rounded-2xl bg-sky p-5">
-                <p className="text-sm font-medium text-slate-700">Reservation ID: {reservationIdFromUrl ?? "Missing reservation ID"}</p>
-                <p className="mt-2 text-sm text-slate-600">{checkoutMode === "live" ? "Stripe checkout URL" : "Checkout placeholder URL"}: {paymentUrl || "Generating..."}</p>
+              <div className="mt-6 grid gap-6 xl:grid-cols-[0.42fr_0.58fr]">
+                <div className="rounded-[1.5rem] bg-slate-950 p-6 text-white">
+                  <p className="text-sm uppercase tracking-[0.2em] text-white/60">Due today</p>
+                  <p className="mt-2 text-sm text-white/70">Reservation ID: {reservationIdFromUrl ?? "Missing reservation ID"}</p>
+                  <div className="mt-5 grid gap-3 text-sm">
+                    <div className="flex items-center justify-between"><span>Weekend rental</span><span>{currency(pricing.rentalSubtotalCents)}</span></div>
+                    <div className="flex items-center justify-between"><span>Delivery</span><span>{currency(pricing.deliveryFeeCents)}</span></div>
+                    <div className="flex items-center justify-between"><span>Damage waiver</span><span>{currency(pricing.damageWaiverFeeCents)}</span></div>
+                    <div className="flex items-center justify-between"><span>Refundable deposit</span><span>{currency(pricing.depositCents)}</span></div>
+                    <div className="mt-2 flex items-center justify-between border-t border-white/10 pt-3 text-base font-semibold"><span>Total due today</span><span>{currency(pricing.totalDueCents)}</span></div>
+                  </div>
+                  <div className="mt-5 rounded-2xl bg-white/5 px-4 py-4 text-sm text-white/80">
+                    The {currency(pricing.depositCents)} deposit is refunded upon satisfactory machine return.
+                  </div>
+                  <div className="mt-4 rounded-2xl bg-white/5 px-4 py-4 text-sm text-white/80">
+                    {paymentStatusMessage || (paymentLoading ? "Preparing secure checkout..." : "Stripe will present the available payment methods here once the session is ready.")}
+                  </div>
+                </div>
+                <div className="rounded-[1.5rem] bg-sky p-4">
+                  {checkoutMode === "live" && checkoutClientSecret && checkoutPublishableKey ? (
+                    <StripeEmbeddedCheckoutCard
+                      clientSecret={checkoutClientSecret}
+                      publishableKey={checkoutPublishableKey}
+                      reservationPublicId={reservationIdFromUrl ?? draft.publicId ?? ""}
+                    />
+                  ) : checkoutMode === "placeholder" ? (
+                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <h3 className="font-display text-2xl text-soil">Stripe placeholder mode</h3>
+                      <p className="mt-3 text-slate-700">
+                        Stripe publishable or secret keys are still missing, so the page is using the placeholder handoff. Once the live keys are present, this section will render the embedded Stripe payment component automatically.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <p className="text-slate-600">{paymentLoading ? "Preparing secure checkout..." : "Loading Stripe checkout..."}</p>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
-                {paymentUrl && checkoutMode === "live" && (
-                  <a href={paymentUrl} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
-                    Open secure checkout
-                  </a>
-                )}
-                {paymentUrl && checkoutMode !== "live" && (
+                {checkoutMode === "placeholder" && (
                   <button type="button" onClick={() => navigate(`/reserve/sign?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
                     Continue to signing
                   </button>

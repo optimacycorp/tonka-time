@@ -9,6 +9,7 @@ const envSchema = z.object({
   SITE_URL: z.string().url().default("http://localhost:5173"),
   API_PORT: z.coerce.number().default(8787),
   ADMIN_EMAILS: z.string().default("optimacycorp@gmail.com"),
+  STRIPE_PUBLISHABLE_KEY: z.string().optional(),
   STRIPE_SECRET_KEY: z.string().optional(),
   STRIPE_WEBHOOK_SECRET: z.string().optional(),
   STRIPE_CURRENCY: z.string().default("usd"),
