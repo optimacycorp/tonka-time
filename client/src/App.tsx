@@ -42,6 +42,8 @@ type ReservationSummary = {
   depositCents?: number;
   totalDueCents?: number;
   status?: string;
+  docusealStatus?: string;
+  signedDocumentUrl?: string | null;
 };
 
 type CheckoutResponse = {
@@ -58,6 +60,16 @@ type CheckoutSessionStatusResponse = {
   status: "open" | "complete" | "expired" | null;
   paymentStatus: "paid" | "unpaid" | "no_payment_required" | null;
   reservationPublicId: string | null;
+};
+
+type DocuSealSubmissionResponse = {
+  mode: "live" | "placeholder";
+  reservationPublicId?: string;
+  submissionId?: string | null;
+  embedUrl?: string | null;
+  status?: string | null;
+  signedDocumentUrl?: string | null;
+  message?: string;
 };
 
 type AvailabilityResponse = {
@@ -495,6 +507,10 @@ function ReservationFlow() {
   const [checkoutMode, setCheckoutMode] = useState<"live" | "placeholder" | "">("");
   const [paymentStatusMessage, setPaymentStatusMessage] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [docusealMode, setDocusealMode] = useState<"live" | "placeholder" | "">("");
+  const [docusealEmbedUrl, setDocusealEmbedUrl] = useState("");
+  const [docusealLoading, setDocusealLoading] = useState(false);
+  const [docusealMessage, setDocusealMessage] = useState("");
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
 
   useEffect(() => {
@@ -507,6 +523,9 @@ function ReservationFlow() {
     }
     if ((location.pathname === "/reserve/sign" || location.pathname === "/reserve/confirmation") && draft.publicId) {
       void loadReservationSummary(draft.publicId);
+    }
+    if (location.pathname === "/reserve/sign" && draft.publicId) {
+      void ensureDocuSealSubmission(draft.publicId);
     }
   }, [location.pathname, draft.publicId, searchParams]);
 
@@ -682,6 +701,50 @@ function ReservationFlow() {
     }
   }
 
+  async function ensureDocuSealSubmission(publicId: string) {
+    if (docusealEmbedUrl || docusealMode === "placeholder" || reservationSummary?.docusealStatus === "COMPLETED") {
+      return;
+    }
+
+    try {
+      setDocusealLoading(true);
+      const currentStatus = await requestJson<DocuSealSubmissionResponse>(`/api/docuseal/submission-status?reservationPublicId=${encodeURIComponent(publicId)}`);
+
+      if (currentStatus.status === "COMPLETED" || currentStatus.signedDocumentUrl) {
+        setDocusealMode(currentStatus.mode);
+        setDocusealMessage("The agreement has already been signed.");
+        setReservationSummary((current) => ({
+          ...current,
+          docusealStatus: currentStatus.status ?? current?.docusealStatus,
+          signedDocumentUrl: currentStatus.signedDocumentUrl ?? current?.signedDocumentUrl ?? null,
+          status: currentStatus.status === "COMPLETED" ? "CONFIRMED" : current?.status,
+        }));
+        return;
+      }
+
+      if (currentStatus.embedUrl) {
+        setDocusealMode(currentStatus.mode);
+        setDocusealEmbedUrl(currentStatus.embedUrl);
+        setDocusealMessage(currentStatus.message ?? "Continue with the embedded agreement below.");
+        return;
+      }
+
+      const created = await requestJson<DocuSealSubmissionResponse>("/api/docuseal/create-submission", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reservationPublicId: publicId }),
+      });
+
+      setDocusealMode(created.mode);
+      setDocusealEmbedUrl(created.embedUrl ?? "");
+      setDocusealMessage(created.message ?? "");
+    } catch (error) {
+      setDocusealMessage(error instanceof Error ? error.message : "Could not prepare the signing session.");
+    } finally {
+      setDocusealLoading(false);
+    }
+  }
+
   function updateField<Key extends keyof ReservationDraft>(field: Key, value: ReservationDraft[Key]) {
     setDraft((current) => ({ ...current, [field]: value }));
   }
@@ -796,6 +859,9 @@ function ReservationFlow() {
     setCheckoutPublishableKey("");
     setCheckoutMode("");
     setPaymentStatusMessage("");
+    setDocusealMode("");
+    setDocusealEmbedUrl("");
+    setDocusealMessage("");
     navigate("/reserve/package");
   }
 
@@ -1131,11 +1197,51 @@ function ReservationFlow() {
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 8</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Agreement signing</h2>
               <p className="mt-4 text-slate-700">
-                This sprint keeps the signing step visible in the customer flow and loads the saved reservation summary. Live DocuSeal embedded signing is the next implementation sprint.
+                Review and sign the rental agreement without leaving the reservation flow. Your saved reservation answers are pushed into DocuSeal so the agreement can be signed online and emailed back to you when complete.
               </p>
-              <div className="mt-6 rounded-2xl bg-field p-5 text-white">
-                <p>Reservation: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Loading..."}</p>
-                <p className="mt-2">Status: {reservationSummary?.status ?? "Draft / pending payment"}</p>
+              <div className="mt-6 grid gap-6 xl:grid-cols-[0.38fr_0.62fr]">
+                <div className="rounded-2xl bg-field p-5 text-white">
+                  <p>Reservation: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Loading..."}</p>
+                  <p className="mt-2">Reservation status: {reservationSummary?.status ?? "Draft / pending payment"}</p>
+                  <p className="mt-2">Agreement status: {reservationSummary?.docusealStatus ?? "Preparing signature request"}</p>
+                  <div className="mt-4 rounded-2xl bg-white/10 px-4 py-4 text-sm text-white/85">
+                    {docusealMessage || (docusealLoading ? "Preparing your agreement..." : "Your agreement will appear here once DocuSeal is ready.")}
+                  </div>
+                  {reservationSummary?.signedDocumentUrl && (
+                    <a href={reservationSummary.signedDocumentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded-full bg-white px-5 py-3 font-semibold text-field">
+                      Open signed copy
+                    </a>
+                  )}
+                </div>
+                <div className="rounded-[1.5rem] bg-sky p-4">
+                  {reservationSummary?.docusealStatus === "COMPLETED" || reservationSummary?.signedDocumentUrl ? (
+                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <h3 className="font-display text-2xl text-soil">Agreement completed</h3>
+                      <p className="mt-3 text-slate-700">
+                        The agreement is already signed. DocuSeal should email a copy to the signer, and you can also open the saved document from the link here.
+                      </p>
+                    </div>
+                  ) : docusealMode === "live" && docusealEmbedUrl ? (
+                    <div className="overflow-hidden rounded-[1.5rem] border border-black/5 bg-white shadow-card">
+                      <iframe
+                        title="DocuSeal agreement signing"
+                        src={docusealEmbedUrl}
+                        className="min-h-[860px] w-full"
+                      />
+                    </div>
+                  ) : docusealMode === "placeholder" ? (
+                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <h3 className="font-display text-2xl text-soil">DocuSeal placeholder mode</h3>
+                      <p className="mt-3 text-slate-700">
+                        DocuSeal credentials or template settings are still missing, so the embedded signing panel cannot load yet. Once the live settings are added, this step will render the agreement automatically.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <p className="text-slate-600">{docusealLoading ? "Preparing your agreement..." : "Loading the signing experience..."}</p>
+                    </div>
+                  )}
+                </div>
               </div>
               <div className="mt-6">
                 <button type="button" onClick={() => navigate(`/reserve/confirmation?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
