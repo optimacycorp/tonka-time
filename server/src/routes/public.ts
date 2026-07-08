@@ -135,6 +135,7 @@ router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
 
   const delivery = parsed.data.jobsiteCity ? classifyDeliveryZone(parsed.data.jobsiteCity) : null;
   const waiverChoice = parsed.data.damageWaiverChoice ?? existing.damageWaiverChoice;
+  const { packageSlug: _packageSlug, ...reservationFields } = parsed.data;
   const pricing = calculatePricing({
     deliveryFeeCents: delivery?.deliveryFeeCents ?? existing.deliveryFeeCents,
     damageWaiverChoice: waiverChoice,
@@ -143,7 +144,7 @@ router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
   const updated = await prisma.reservation.update({
     where: { publicId },
     data: {
-      ...parsed.data,
+      ...reservationFields,
       weekendStartDate: parsed.data.weekendStartDate ? new Date(`${parsed.data.weekendStartDate}T00:00:00.000Z`) : undefined,
       weekendEndDate: parsed.data.weekendStartDate ? new Date(`${weekendEndDate(parsed.data.weekendStartDate)}T00:00:00.000Z`) : undefined,
       deliveryZone: (delivery?.zone ?? existing.deliveryZone) as "CORE" | "EXTENDED" | "MANUAL_REVIEW",
