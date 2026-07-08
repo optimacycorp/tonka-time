@@ -1,6 +1,8 @@
 import { Router, type RequestHandler } from "express";
 import { prisma } from "../lib/prisma.js";
 import { availabilityQuerySchema, reservationCreateSchema, reservationUpdateSchema } from "../lib/schemas.js";
+import { optionalAuth } from "../lib/auth.js";
+import { serializeReservation } from "../lib/orders.js";
 import { calculatePricing, classifyDeliveryZone, isFriday, weekendEndDate } from "../lib/reservations.js";
 
 const router = Router();
@@ -10,6 +12,8 @@ const reservedStatuses = ["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "AWAITING_AD
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
   Promise.resolve(handler(req, res, next)).catch(next);
 };
+
+router.use(optionalAuth);
 
 router.get("/availability", asyncRoute(async (req, res) => {
   const parsed = availabilityQuerySchema.safeParse(req.query);
@@ -81,6 +85,7 @@ router.post("/reservations", asyncRoute(async (req, res) => {
   const reservation = await prisma.reservation.create({
     data: {
       publicId: `TTR-${new Date().getUTCFullYear()}-${Math.floor(Math.random() * 1000000).toString().padStart(6, "0")}`,
+      userId: res.locals.user?.id ?? null,
       status: "DRAFT",
       weekendStartDate: new Date(`${weekendStartDate}T00:00:00.000Z`),
       weekendEndDate: new Date(`${weekendEndDate(weekendStartDate)}T00:00:00.000Z`),
@@ -109,7 +114,7 @@ router.post("/reservations", asyncRoute(async (req, res) => {
     },
   });
 
-  return res.status(201).json(reservation);
+  return res.status(201).json(serializeReservation(reservation));
 }));
 
 router.get("/reservations/:publicId", asyncRoute(async (req, res) => {
@@ -118,10 +123,7 @@ router.get("/reservations/:publicId", asyncRoute(async (req, res) => {
   if (!reservation) {
     return res.status(404).json({ error: "Reservation not found" });
   }
-  return res.json({
-    ...reservation,
-    signingStatus: reservation.docusealStatus,
-  });
+  return res.json(serializeReservation(reservation));
 }));
 
 router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
@@ -159,7 +161,7 @@ router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
     },
   });
 
-  return res.json(updated);
+  return res.json(serializeReservation(updated));
 }));
 
 function nextFriday() {

@@ -1,27 +1,41 @@
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
-import { adminEmails } from "../lib/config.js";
+import { requireAuth, requireRole } from "../lib/auth.js";
+import { cancelReservationByPublicId, serializeReservation } from "../lib/orders.js";
 
 const router = Router();
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
   Promise.resolve(handler(req, res, next)).catch(next);
 };
 
-router.use((req, res, next) => {
-  const adminEmail = req.header("x-admin-email")?.toLowerCase();
-  if (!adminEmail || !adminEmails.includes(adminEmail)) {
-    return res.status(401).json({ error: "Admin access required" });
-  }
-  next();
-});
+router.use(requireAuth);
+router.use(requireRole("ADMIN"));
 
 router.get("/reservations", asyncRoute(async (_req, res) => {
   const reservations = await prisma.reservation.findMany({
     orderBy: { createdAt: "desc" },
     take: 100,
+    include: {
+      user: {
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          role: true,
+        },
+      },
+      notifications: {
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      },
+    },
   });
-  return res.json(reservations);
+  return res.json(reservations.map((reservation) => ({
+    ...serializeReservation(reservation),
+    user: reservation.user,
+    notifications: reservation.notifications,
+  })));
 }));
 
 router.patch("/reservations/:id", asyncRoute(async (req, res) => {
@@ -45,6 +59,25 @@ router.patch("/reservations/:id", asyncRoute(async (req, res) => {
   });
 
   return res.json(reservation);
+}));
+
+router.post("/reservations/:publicId/cancel", asyncRoute(async (req, res) => {
+  const result = await cancelReservationByPublicId({
+    publicId: String(req.params.publicId),
+    initiatedBy: "admin",
+    actorUserId: res.locals.user.id as string,
+  });
+
+  return res.json(result);
+}));
+
+router.get("/notifications", asyncRoute(async (_req, res) => {
+  const notifications = await prisma.notificationLog.findMany({
+    orderBy: { createdAt: "desc" },
+    take: 100,
+  });
+
+  return res.json(notifications);
 }));
 
 router.post("/block-date", asyncRoute(async (req, res) => {

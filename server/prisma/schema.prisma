@@ -10,6 +10,7 @@ datasource db {
 model Reservation {
   id                      String             @id @default(cuid())
   publicId                String             @unique
+  userId                  String?
   status                  ReservationStatus  @default(DRAFT)
   packageId               String?
   machineId               String?
@@ -55,11 +56,79 @@ model Reservation {
   cancelledAt             DateTime?
   createdAt               DateTime           @default(now())
   updatedAt               DateTime           @updatedAt
+  user                    User?              @relation(fields: [userId], references: [id])
+  notifications           NotificationLog[]
 
   @@index([weekendStartDate, status])
   @@index([email])
   @@index([paymentStatus])
   @@index([docusealStatus])
+  @@index([userId])
+}
+
+model User {
+  id              String             @id @default(cuid())
+  email           String?            @unique
+  phone           String?            @unique
+  passwordHash    String?
+  firstName       String?
+  lastName        String?
+  role            UserRole           @default(CUSTOMER)
+  phoneVerifiedAt DateTime?
+  emailVerifiedAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  reservations    Reservation[]
+  sessions        AuthSession[]
+  phoneCodes      PhoneLoginCode[]
+  notifications   NotificationLog[]
+}
+
+model AuthSession {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  lastUsedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model PhoneLoginCode {
+  id         String   @id @default(cuid())
+  userId     String?
+  phone      String
+  codeHash   String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([phone, expiresAt])
+}
+
+model NotificationLog {
+  id             String             @id @default(cuid())
+  userId         String?
+  reservationId  String?
+  channel        NotificationChannel
+  destination    String
+  subject        String?
+  message        String
+  status         NotificationStatus @default(PENDING)
+  provider       String?
+  providerRef    String?
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  user           User?              @relation(fields: [userId], references: [id], onDelete: SetNull)
+  reservation    Reservation?       @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([reservationId, createdAt])
+  @@index([userId, createdAt])
 }
 
 model RentalPackage {
@@ -255,4 +324,22 @@ enum UploadedBy {
 enum WebhookProvider {
   STRIPE
   DOCUSEAL
+}
+
+enum UserRole {
+  CUSTOMER
+  ADMIN
+}
+
+enum NotificationChannel {
+  EMAIL
+  SMS
+  SYSTEM
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  SKIPPED
+  FAILED
 }

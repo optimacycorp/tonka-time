@@ -6,10 +6,12 @@ Tonka Time Rentals is a Vite + React frontend with a Node.js + Express API for T
 
 - Public marketing pages for Tonka Time Rentals
 - Multi-step reservation flow for weekend-only rentals
-- Admin portal shell with reservation and operations views
-- Express API routes for availability, reservations, admin, Stripe, and SignNow placeholders
+- Optional customer authentication with email/password or phone-code sign-in
+- Customer account area for reservation history, payment status, notifications, and cancellation
+- Admin portal with authenticated order visibility plus cancellation/refund actions
+- Express API routes for availability, reservations, auth, account, admin, Stripe, and SignNow placeholders
 - Embedded Stripe checkout and SignNow signing scaffolding for the customer flow
-- Prisma schema and seed data for packages, machines, service areas, videos, and FAQs
+- Prisma schema and seed data for packages, machines, service areas, videos, FAQs, and the seeded admin account
 - Docker, Docker Compose, and Nginx configuration for RackNerd
 
 ## Local development
@@ -23,6 +25,20 @@ Tonka Time Rentals is a Vite + React frontend with a Node.js + Express API for T
 7. Run `npm run dev`.
 
 The frontend runs on `http://localhost:5173` and the API runs on `http://localhost:8787`.
+
+## Admin account
+
+The seed now creates an admin account:
+
+- Email: `admin@tonkatimerentals.com`
+- Password: `Ang1ular1$`
+
+Rotate this password immediately in production after the first deploy.
+
+## Notes
+
+- Phone authentication works through a one-time code flow. If Twilio credentials are not configured yet, the API returns a dev-only code so the flow can still be tested.
+- Reservation cancellation updates the reservation status, releases the calendar slot, marks refund state, and logs customer/admin notifications.
 
 ## Deployment
 

@@ -85,9 +85,44 @@ type FridayOption = AvailabilityResponse & {
   label: string;
 };
 
+type AuthUser = {
+  id: string;
+  email?: string | null;
+  phone?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  role: "CUSTOMER" | "ADMIN";
+};
+
+type AuthResponse = {
+  token: string;
+  expiresAt: string;
+  user: AuthUser;
+};
+
+type AccountReservation = ReservationSummary & {
+  id: string;
+  email?: string;
+  phone?: string;
+  paymentStatus?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+type NotificationItem = {
+  id: string;
+  channel: "EMAIL" | "SMS" | "SYSTEM";
+  destination: string;
+  subject?: string | null;
+  message: string;
+  status: "PENDING" | "SENT" | "SKIPPED" | "FAILED";
+  createdAt: string;
+};
+
 const heroGraphic = "/images/tonka-hero-landscape.png";
 const promoPoster = "/images/tonka-promo-poster.png";
 const draftStorageKey = "tonka-time-reservation-draft";
+const authStorageKey = "tonka-time-auth-session";
 
 const serviceCities = [
   "Colorado Springs",
@@ -204,6 +239,7 @@ function Shell({ children }: { children: React.ReactNode }) {
               ["/faq", "FAQ"],
               ["/videos", "Videos"],
               ["/contact", "Contact"],
+              ["/account", "Account"],
               ["/reserve/package", "Reserve"],
             ].map(([to, label]) => (
               <NavLink key={to} to={to} className="transition hover:text-ember">
@@ -1263,8 +1299,12 @@ function ReservationFlow() {
                 <p className="font-semibold text-slate-700">Reservation ID: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Pending"}</p>
                 <p className="mt-2 text-sm text-slate-600">Weekend: {reservationSummary?.weekendStartDate?.slice(0, 10) ?? draft.weekendStartDate} to {reservationSummary?.weekendEndDate?.slice(0, 10) ?? derivedWeekendEnd}</p>
                 <p className="mt-2 text-sm text-slate-600">Delivery zone: {reservationSummary?.deliveryZone ?? draft.deliveryZone ?? "Pending"}</p>
+                <p className="mt-4 text-sm text-slate-600">You can create or sign in to an account later with the same email or phone number to see payment status, manage reservations, and cancel an order if needed.</p>
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
+                <NavLink to="/account" className="rounded-full border border-soil px-6 py-3 font-semibold text-soil">
+                  Manage this order
+                </NavLink>
                 <button type="button" onClick={resetDraft} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
                   Start another reservation
                 </button>
@@ -1379,7 +1419,16 @@ function formatMondayLabel(endDate: string) {
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, init);
+  const storedAuth = getStoredAuthSession();
+  const headers = new Headers(init?.headers);
+  if (storedAuth?.token && !headers.has("Authorization")) {
+    headers.set("Authorization", `Bearer ${storedAuth.token}`);
+  }
+
+  const response = await fetch(input, {
+    ...init,
+    headers,
+  });
   const text = await response.text();
   let data: unknown = null;
 
@@ -1403,28 +1452,444 @@ async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Pro
   return data as T;
 }
 
-function normalizeReservationSummary(summary: ReservationSummary): ReservationSummary {
+function normalizeReservationSummary<T extends ReservationSummary>(summary: T): T & { signingStatus?: string } {
   return {
     ...summary,
     signingStatus: summary.signingStatus ?? summary.docusealStatus,
   };
 }
 
-function AdminPage() {
+function getStoredAuthSession() {
+  const raw = localStorage.getItem(authStorageKey);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as { token: string; user: AuthUser; expiresAt: string };
+  } catch {
+    return null;
+  }
+}
+
+function setStoredAuthSession(session: { token: string; user: AuthUser; expiresAt: string }) {
+  localStorage.setItem(authStorageKey, JSON.stringify(session));
+}
+
+function clearStoredAuthSession() {
+  localStorage.removeItem(authStorageKey);
+}
+
+function AccountPage() {
+  const [authSession, setAuthSession] = useState<{ token: string; user: AuthUser; expiresAt: string } | null>(() => getStoredAuthSession());
+  const [orders, setOrders] = useState<AccountReservation[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [signupForm, setSignupForm] = useState({ firstName: "", lastName: "", email: "", phone: "", password: "" });
+  const [loginForm, setLoginForm] = useState({ email: "", password: "" });
+  const [phoneForm, setPhoneForm] = useState({ firstName: "", lastName: "", phone: "", code: "" });
+  const [devCode, setDevCode] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!authSession) {
+      setOrders([]);
+      setNotifications([]);
+      return;
+    }
+
+    void loadAccountData();
+  }, [authSession?.token]);
+
+  async function loadAccountData() {
+    try {
+      setLoading(true);
+      const me = await requestJson<{ user: AuthUser }>("/api/auth/me");
+      const [reservationData, notificationData] = await Promise.all([
+        requestJson<AccountReservation[]>("/api/account/reservations"),
+        requestJson<NotificationItem[]>("/api/account/notifications"),
+      ]);
+      setAuthSession((current) => current ? { ...current, user: me.user } : current);
+      setOrders(reservationData.map(normalizeReservationSummary));
+      setNotifications(notificationData);
+    } catch (loadError) {
+      clearStoredAuthSession();
+      setAuthSession(null);
+      setError(loadError instanceof Error ? loadError.message : "Could not load your account.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleSignup() {
+    try {
+      setLoading(true);
+      setError("");
+      const response = await requestJson<AuthResponse>("/api/auth/signup", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(signupForm),
+      });
+      const session = { token: response.token, user: response.user, expiresAt: response.expiresAt };
+      setStoredAuthSession(session);
+      setAuthSession(session);
+      setMessage("Account created. Matching reservations tied to this email or phone are now available below.");
+    } catch (signupError) {
+      setError(signupError instanceof Error ? signupError.message : "Could not create your account.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogin() {
+    try {
+      setLoading(true);
+      setError("");
+      const response = await requestJson<AuthResponse>("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(loginForm),
+      });
+      const session = { token: response.token, user: response.user, expiresAt: response.expiresAt };
+      setStoredAuthSession(session);
+      setAuthSession(session);
+      setMessage("Signed in successfully.");
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : "Could not sign in.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRequestPhoneCode() {
+    try {
+      setLoading(true);
+      setError("");
+      const response = await requestJson<{ message: string; devCode?: string }>("/api/auth/phone/request-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: phoneForm.firstName,
+          lastName: phoneForm.lastName,
+          phone: phoneForm.phone,
+        }),
+      });
+      setDevCode(response.devCode ?? "");
+      setMessage(response.message);
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : "Could not send the phone code.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleVerifyPhoneCode() {
+    try {
+      setLoading(true);
+      setError("");
+      const response = await requestJson<AuthResponse>("/api/auth/phone/verify-code", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          phone: phoneForm.phone,
+          code: phoneForm.code,
+        }),
+      });
+      const session = { token: response.token, user: response.user, expiresAt: response.expiresAt };
+      setStoredAuthSession(session);
+      setAuthSession(session);
+      setMessage("Phone authentication complete.");
+    } catch (verifyError) {
+      setError(verifyError instanceof Error ? verifyError.message : "Could not verify the phone code.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    try {
+      await requestJson("/api/auth/logout", { method: "POST" });
+    } catch {
+      // Clear the local session either way.
+    }
+    clearStoredAuthSession();
+    setAuthSession(null);
+    setMessage("Signed out.");
+  }
+
+  async function handleCancelReservation(publicId: string) {
+    const confirmed = window.confirm(`Cancel reservation ${publicId}? Paid reservations will be refunded.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await requestJson<{ refundIssued: boolean; refundAmountCents: number; reservation: AccountReservation }>(`/api/account/reservations/${publicId}/cancel`, {
+        method: "POST",
+      });
+      setOrders((current) => current.map((order) => (order.publicId === publicId ? normalizeReservationSummary(result.reservation) : order)));
+      setMessage(result.refundIssued ? `Reservation ${publicId} cancelled and refund initiated.` : `Reservation ${publicId} cancelled.`);
+      await loadAccountData();
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Could not cancel this reservation.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
-    <SimplePage title="Admin Portal" intro="This is the operational side of the MVP for reservations, calendar blocks, machine assignment, videos, FAQs, and reservation follow-up.">
-      <div className="grid gap-6 md:grid-cols-3">
-        {[
-          ["Reservations", "Track payment, agreement, 811, delivery zone, and machine assignment."],
-          ["Calendar and blocks", "Manage booked weekends, admin holds, and maintenance windows."],
-          ["Content and settings", "Update videos, FAQs, pricing, service areas, and admin notes."],
-        ].map(([title, body]) => (
-          <article key={title} className="rounded-[1.75rem] bg-white p-6 shadow-card">
-            <h2 className="font-display text-2xl text-soil">{title}</h2>
-            <p className="mt-3 text-slate-700">{body}</p>
-          </article>
-        ))}
-      </div>
+    <SimplePage title="Your Account" intro="Account access is optional. Use the same email or phone number from your reservation to claim orders, review payment status, and cancel an active booking.">
+      {error && <p className="mb-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
+      {message && <p className="mb-6 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p>}
+
+      {!authSession ? (
+        <div className="grid gap-6 lg:grid-cols-2">
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-card">
+            <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Email account</p>
+            <h2 className="mt-2 font-display text-3xl text-soil">Sign up with email and password</h2>
+            <div className="mt-6 grid gap-3">
+              <input value={signupForm.firstName} onChange={(event) => setSignupForm((current) => ({ ...current, firstName: event.target.value }))} placeholder="First name" className="rounded-2xl border border-black/10 px-4 py-3" />
+              <input value={signupForm.lastName} onChange={(event) => setSignupForm((current) => ({ ...current, lastName: event.target.value }))} placeholder="Last name" className="rounded-2xl border border-black/10 px-4 py-3" />
+              <input value={signupForm.email} onChange={(event) => setSignupForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email address" className="rounded-2xl border border-black/10 px-4 py-3" />
+              <input value={signupForm.phone} onChange={(event) => setSignupForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Phone (optional)" className="rounded-2xl border border-black/10 px-4 py-3" />
+              <input type="password" value={signupForm.password} onChange={(event) => setSignupForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" className="rounded-2xl border border-black/10 px-4 py-3" />
+            </div>
+            <button type="button" onClick={() => void handleSignup()} disabled={loading} className="mt-6 rounded-full bg-soil px-6 py-3 font-semibold text-white disabled:opacity-60">
+              {loading ? "Working..." : "Create account"}
+            </button>
+            <div className="mt-8 border-t border-black/5 pt-6">
+              <h3 className="font-display text-2xl text-soil">Already have an account?</h3>
+              <div className="mt-4 grid gap-3">
+                <input value={loginForm.email} onChange={(event) => setLoginForm((current) => ({ ...current, email: event.target.value }))} placeholder="Email address" className="rounded-2xl border border-black/10 px-4 py-3" />
+                <input type="password" value={loginForm.password} onChange={(event) => setLoginForm((current) => ({ ...current, password: event.target.value }))} placeholder="Password" className="rounded-2xl border border-black/10 px-4 py-3" />
+              </div>
+              <button type="button" onClick={() => void handleLogin()} disabled={loading} className="mt-4 rounded-full border border-soil px-6 py-3 font-semibold text-soil disabled:opacity-60">
+                Sign in
+              </button>
+            </div>
+          </section>
+
+          <section className="rounded-[1.75rem] bg-slate-950 p-6 text-white shadow-card">
+            <p className="text-sm uppercase tracking-[0.2em] text-white/60">Phone access</p>
+            <h2 className="mt-2 font-display text-3xl">Sign in by text message</h2>
+            <p className="mt-3 text-white/75">Use the phone number from your reservation and we’ll attach matching orders to your account after verification.</p>
+            <div className="mt-6 grid gap-3">
+              <input value={phoneForm.firstName} onChange={(event) => setPhoneForm((current) => ({ ...current, firstName: event.target.value }))} placeholder="First name (optional)" className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-white placeholder:text-white/45" />
+              <input value={phoneForm.lastName} onChange={(event) => setPhoneForm((current) => ({ ...current, lastName: event.target.value }))} placeholder="Last name (optional)" className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-white placeholder:text-white/45" />
+              <input value={phoneForm.phone} onChange={(event) => setPhoneForm((current) => ({ ...current, phone: event.target.value }))} placeholder="Mobile phone" className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-white placeholder:text-white/45" />
+            </div>
+            <button type="button" onClick={() => void handleRequestPhoneCode()} disabled={loading} className="mt-6 rounded-full bg-ember px-6 py-3 font-semibold text-white disabled:opacity-60">
+              Send text code
+            </button>
+            <div className="mt-8 border-t border-white/10 pt-6">
+              <input value={phoneForm.code} onChange={(event) => setPhoneForm((current) => ({ ...current, code: event.target.value }))} placeholder="6-digit code" className="rounded-2xl border border-white/15 bg-white/5 px-4 py-3 text-white placeholder:text-white/45" />
+              <button type="button" onClick={() => void handleVerifyPhoneCode()} disabled={loading} className="mt-4 rounded-full border border-white/20 px-6 py-3 font-semibold text-white disabled:opacity-60">
+                Verify code
+              </button>
+              {devCode && <p className="mt-4 text-sm text-amber-300">Dev code: {devCode}</p>}
+            </div>
+          </section>
+        </div>
+      ) : (
+        <div className="grid gap-6">
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-card">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Signed in</p>
+                <h2 className="mt-2 font-display text-3xl text-soil">{authSession.user.firstName || authSession.user.email || authSession.user.phone || "Tonka customer"}</h2>
+                <p className="mt-2 text-slate-600">Orders linked to {authSession.user.email ?? authSession.user.phone ?? "your account"} appear below.</p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                {authSession.user.role === "ADMIN" && (
+                  <NavLink to="/admin" className="rounded-full border border-soil px-5 py-3 font-semibold text-soil">
+                    Open admin
+                  </NavLink>
+                )}
+                <button type="button" onClick={() => void handleLogout()} className="rounded-full bg-soil px-5 py-3 font-semibold text-white">
+                  Sign out
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-card">
+            <h2 className="font-display text-3xl text-soil">Reservations and payment status</h2>
+            <div className="mt-6 grid gap-4">
+              {orders.length === 0 ? (
+                <p className="text-slate-600">{loading ? "Loading reservations..." : "No reservations are linked to this account yet."}</p>
+              ) : (
+                orders.map((order) => (
+                  <article key={order.id} className="rounded-[1.5rem] border border-black/5 bg-sky p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <h3 className="font-display text-2xl text-soil">{order.publicId}</h3>
+                        <p className="mt-2 text-sm text-slate-700">Weekend: {order.weekendStartDate?.slice(0, 10)} to {order.weekendEndDate?.slice(0, 10)}</p>
+                        <p className="mt-2 text-sm text-slate-700">Reservation status: {order.status ?? "Pending"}</p>
+                        <p className="mt-2 text-sm text-slate-700">Payment status: {order.paymentStatus ?? "Not started"}</p>
+                        <p className="mt-2 text-sm text-slate-700">Total due: {currency(order.totalDueCents ?? 0)}</p>
+                      </div>
+                      {order.status !== "CANCELLED" && ["DRAFT", "PENDING_PAYMENT", "PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "CONFIRMED"].includes(order.status ?? "") && (
+                        <button type="button" onClick={() => void handleCancelReservation(order.publicId ?? "")} className="rounded-full border border-rose-300 px-5 py-3 font-semibold text-rose-700">
+                          Cancel and refund
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-card">
+            <h2 className="font-display text-3xl text-soil">Notifications</h2>
+            <div className="mt-6 grid gap-3">
+              {notifications.length === 0 ? (
+                <p className="text-slate-600">No account notifications yet.</p>
+              ) : (
+                notifications.map((item) => (
+                  <article key={item.id} className="rounded-[1.25rem] border border-black/5 p-4">
+                    <p className="text-xs uppercase tracking-[0.16em] text-slate-500">{item.channel} · {item.status}</p>
+                    <p className="mt-2 font-semibold text-soil">{item.subject ?? item.destination}</p>
+                    <p className="mt-2 text-sm text-slate-700">{item.message}</p>
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      )}
+    </SimplePage>
+  );
+}
+
+function AdminPage() {
+  const [authSession, setAuthSession] = useState<{ token: string; user: AuthUser; expiresAt: string } | null>(() => getStoredAuthSession());
+  const [reservations, setReservations] = useState<Array<AccountReservation & { user?: AuthUser; notifications?: NotificationItem[] }>>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    void loadAdminData();
+  }, []);
+
+  async function loadAdminData() {
+    try {
+      setLoading(true);
+      const me = await requestJson<{ user: AuthUser }>("/api/auth/me");
+      if (me.user.role !== "ADMIN") {
+        setAuthSession(null);
+        setError("Admin access is only available to authenticated admin users.");
+        return;
+      }
+
+      setAuthSession((current) => current ? { ...current, user: me.user } : current);
+      const [reservationData, notificationData] = await Promise.all([
+        requestJson<Array<AccountReservation & { user?: AuthUser; notifications?: NotificationItem[] }>>("/api/admin/reservations"),
+        requestJson<NotificationItem[]>("/api/admin/notifications"),
+      ]);
+      setReservations(reservationData.map((item) => ({ ...normalizeReservationSummary(item), user: item.user, notifications: item.notifications })));
+      setNotifications(notificationData);
+    } catch (adminError) {
+      setError(adminError instanceof Error ? adminError.message : "Could not load the admin dashboard.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleAdminCancel(publicId: string) {
+    const confirmed = window.confirm(`Cancel reservation ${publicId} from the admin dashboard?`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      const result = await requestJson<{ refundIssued: boolean }>(`/api/admin/reservations/${publicId}/cancel`, { method: "POST" });
+      setMessage(result.refundIssued ? `Reservation ${publicId} cancelled and refund initiated.` : `Reservation ${publicId} cancelled.`);
+      await loadAdminData();
+    } catch (cancelError) {
+      setError(cancelError instanceof Error ? cancelError.message : "Could not cancel this reservation.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <SimplePage title="Admin Portal" intro="This dashboard now uses authenticated admin access so orders, payment state, and cancellation/refund actions live behind the seeded Tonka admin account.">
+      {error && <p className="mb-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
+      {message && <p className="mb-6 rounded-2xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{message}</p>}
+
+      {!authSession || authSession.user.role !== "ADMIN" ? (
+        <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
+          <h2 className="font-display text-3xl text-soil">Admin sign-in required</h2>
+          <p className="mt-3 text-slate-700">Sign in through the account page with `admin@tonkatimerentals.com` to manage reservations and refunds here.</p>
+          <NavLink to="/account" className="mt-6 inline-flex rounded-full bg-soil px-6 py-3 font-semibold text-white">
+            Open account login
+          </NavLink>
+        </div>
+      ) : (
+        <div className="grid gap-6">
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-card">
+            <div className="grid gap-4 md:grid-cols-3">
+              <article className="rounded-[1.5rem] bg-sky p-5">
+                <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Reservations</p>
+                <p className="mt-3 font-display text-4xl text-soil">{reservations.length}</p>
+              </article>
+              <article className="rounded-[1.5rem] bg-sky p-5">
+                <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Active orders</p>
+                <p className="mt-3 font-display text-4xl text-soil">{reservations.filter((item) => item.status !== "CANCELLED").length}</p>
+              </article>
+              <article className="rounded-[1.5rem] bg-sky p-5">
+                <p className="text-sm uppercase tracking-[0.18em] text-slate-500">Notifications</p>
+                <p className="mt-3 font-display text-4xl text-soil">{notifications.length}</p>
+              </article>
+            </div>
+          </section>
+
+          <section className="rounded-[1.75rem] bg-white p-6 shadow-card">
+            <h2 className="font-display text-3xl text-soil">Order management</h2>
+            <div className="mt-6 grid gap-4">
+              {reservations.length === 0 ? (
+                <p className="text-slate-600">{loading ? "Loading orders..." : "No reservations found."}</p>
+              ) : (
+                reservations.map((order) => (
+                  <article key={order.id} className="rounded-[1.5rem] border border-black/5 bg-sky p-5">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
+                      <div>
+                        <h3 className="font-display text-2xl text-soil">{order.publicId}</h3>
+                        <p className="mt-2 text-sm text-slate-700">Customer: {order.user?.email ?? order.email ?? "No email"} / {order.user?.phone ?? order.phone ?? "No phone"}</p>
+                        <p className="mt-2 text-sm text-slate-700">Weekend: {order.weekendStartDate?.slice(0, 10)} to {order.weekendEndDate?.slice(0, 10)}</p>
+                        <p className="mt-2 text-sm text-slate-700">Reservation status: {order.status}</p>
+                        <p className="mt-2 text-sm text-slate-700">Payment status: {order.paymentStatus ?? "Not started"}</p>
+                        <p className="mt-2 text-sm text-slate-700">Agreement status: {order.signingStatus ?? "Not started"}</p>
+                      </div>
+                      {order.status !== "CANCELLED" && (
+                        <button type="button" onClick={() => void handleAdminCancel(order.publicId ?? "")} className="rounded-full border border-rose-300 px-5 py-3 font-semibold text-rose-700">
+                          Cancel and refund
+                        </button>
+                      )}
+                    </div>
+                    {order.notifications && order.notifications.length > 0 && (
+                      <div className="mt-4 rounded-[1.25rem] bg-white p-4">
+                        <p className="text-xs uppercase tracking-[0.16em] text-slate-500">Recent notifications</p>
+                        <div className="mt-3 grid gap-2">
+                          {order.notifications.map((note) => (
+                            <p key={note.id} className="text-sm text-slate-700">{note.channel} · {note.status} · {note.message}</p>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </article>
+                ))
+              )}
+            </div>
+          </section>
+        </div>
+      )}
     </SimplePage>
   );
 }
@@ -1439,6 +1904,7 @@ export default function App() {
       <Route path="/safety-checklist" element={<SafetyChecklistPage />} />
       <Route path="/videos" element={<VideosPage />} />
       <Route path="/contact" element={<ContactPage />} />
+      <Route path="/account" element={<AccountPage />} />
       <Route path="/reserve/package" element={<ReservationFlow />} />
       <Route path="/reserve/date" element={<ReservationFlow />} />
       <Route path="/reserve/delivery" element={<ReservationFlow />} />

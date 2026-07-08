@@ -1,6 +1,21 @@
 import { PrismaClient } from "@prisma/client";
+import crypto from "node:crypto";
 
 const prisma = new PrismaClient();
+
+function hashPassword(password) {
+  return new Promise((resolve, reject) => {
+    const salt = crypto.randomBytes(16).toString("hex");
+    crypto.pbkdf2(password, salt, 210000, 32, "sha256", (error, derivedKey) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+
+      resolve(`pbkdf2$210000$${salt}$${derivedKey.toString("hex")}`);
+    });
+  });
+}
 
 async function main() {
   await prisma.rentalPackage.upsert({
@@ -103,6 +118,25 @@ async function main() {
       },
     ],
     skipDuplicates: true,
+  });
+
+  await prisma.user.upsert({
+    where: { email: "admin@tonkatimerentals.com" },
+    update: {
+      firstName: "Tonka",
+      lastName: "Admin",
+      role: "ADMIN",
+      passwordHash: await hashPassword("Ang1ular1$"),
+      emailVerifiedAt: new Date(),
+    },
+    create: {
+      email: "admin@tonkatimerentals.com",
+      firstName: "Tonka",
+      lastName: "Admin",
+      role: "ADMIN",
+      passwordHash: await hashPassword("Ang1ular1$"),
+      emailVerifiedAt: new Date(),
+    },
   });
 }
 

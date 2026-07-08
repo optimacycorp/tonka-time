@@ -6,6 +6,8 @@ import type { NextFunction, Request, Response } from "express";
 import { env } from "./lib/config.js";
 import publicRoutes from "./routes/public.js";
 import adminRoutes from "./routes/admin.js";
+import authRoutes from "./routes/auth.js";
+import accountRoutes from "./routes/account.js";
 import stripeRoutes, { stripeWebhookHandler } from "./routes/stripe.js";
 import signNowRoutes from "./routes/signnow.js";
 
@@ -20,6 +22,8 @@ app.get("/api/health", (_req, res) => {
   res.json({ ok: true, app: "tonka-time-rentals" });
 });
 
+app.use("/api/auth", authRoutes);
+app.use("/api/account", accountRoutes);
 app.use("/api", publicRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/stripe", stripeRoutes);
