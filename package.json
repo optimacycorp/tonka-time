@@ -12,6 +12,7 @@
     "start": "npm run start -w server",
     "prisma:generate": "npm run prisma:generate -w server",
     "prisma:deploy": "npm run prisma:deploy -w server",
+    "prisma:push": "npm run prisma:push -w server",
     "prisma:migrate": "npm run prisma:migrate -w server",
     "prisma:seed": "npm run prisma:seed -w server"
   },

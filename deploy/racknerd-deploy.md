@@ -72,6 +72,21 @@ This script:
 - optionally seeds default data
 - verifies Docker and Nginx status
 
+## Prisma fallback for a brand-new server
+
+If `npm run prisma:deploy` fails with `P3015` even though `migration.sql` exists in `/app/server/prisma/migrations`, use schema push for the initial bootstrap:
+
+```bash
+cd /home/deploy/apps/tonka-time
+sudo docker compose up -d --build
+sudo docker compose exec app npm run prisma:generate
+sudo docker compose exec app npm run prisma:push
+sudo docker compose exec app npm run prisma:seed
+sudo docker compose restart app
+```
+
+This is safe for the current Tonka Time production database because it is still being initialized and does not need migration history preservation yet.
+
 ## Manual certbot rerun
 
 If you ever need to reissue certificates:
