@@ -7,7 +7,7 @@ import { env } from "./lib/config.js";
 import publicRoutes from "./routes/public.js";
 import adminRoutes from "./routes/admin.js";
 import stripeRoutes, { stripeWebhookHandler } from "./routes/stripe.js";
-import docusealRoutes from "./routes/docuseal.js";
+import signNowRoutes from "./routes/signnow.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -23,7 +23,7 @@ app.get("/api/health", (_req, res) => {
 app.use("/api", publicRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/stripe", stripeRoutes);
-app.use("/api/docuseal", docusealRoutes);
+app.use("/api/signnow", signNowRoutes);
 
 app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
   if (!req.path.startsWith("/api")) {

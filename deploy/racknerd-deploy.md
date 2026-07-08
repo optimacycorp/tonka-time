@@ -100,5 +100,5 @@ bash deploy/issue-certificates.sh
 
 - Run daily PostgreSQL backups.
 - Keep video uploads in object storage instead of the repo.
-- Add real Stripe, DocuSeal, and email secrets before launch.
+- Add real Stripe, SignNow, and email secrets before launch.
 - Re-run `bash deploy/deploy-app.sh` after every production push.

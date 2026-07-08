@@ -118,7 +118,10 @@ router.get("/reservations/:publicId", asyncRoute(async (req, res) => {
   if (!reservation) {
     return res.status(404).json({ error: "Reservation not found" });
   }
-  return res.json(reservation);
+  return res.json({
+    ...reservation,
+    signingStatus: reservation.docusealStatus,
+  });
 }));
 
 router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {

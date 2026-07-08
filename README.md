@@ -7,8 +7,8 @@ Tonka Time Rentals is a Vite + React frontend with a Node.js + Express API for T
 - Public marketing pages for Tonka Time Rentals
 - Multi-step reservation flow for weekend-only rentals
 - Admin portal shell with reservation and operations views
-- Express API routes for availability, reservations, admin, Stripe, and DocuSeal placeholders
-- Embedded Stripe checkout and embedded DocuSeal signing scaffolding for the customer flow
+- Express API routes for availability, reservations, admin, Stripe, and SignNow placeholders
+- Embedded Stripe checkout and SignNow signing scaffolding for the customer flow
 - Prisma schema and seed data for packages, machines, service areas, videos, and FAQs
 - Docker, Docker Compose, and Nginx configuration for RackNerd
 
