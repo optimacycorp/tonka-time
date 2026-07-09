@@ -768,10 +768,17 @@ function ReservationFlow() {
         return;
       }
 
-      if (currentStatus.embedUrl) {
+      if (isSafeEmbeddedSigningUrl(currentStatus.embedUrl)) {
         setSignNowMode(currentStatus.mode);
-        setSignNowEmbedUrl(currentStatus.embedUrl);
+        setSignNowEmbedUrl(currentStatus.embedUrl ?? "");
         setSignNowMessage(currentStatus.message ?? "Continue with the embedded OpenSign agreement below.");
+        return;
+      }
+
+      if (currentStatus.embedUrl) {
+        setSignNowMode("placeholder");
+        setSignNowEmbedUrl("");
+        setSignNowMessage("OpenSign returned a non-document URL, so the setup screen was blocked instead of being shown to your customer.");
         return;
       }
 
@@ -781,9 +788,16 @@ function ReservationFlow() {
         body: JSON.stringify({ reservationPublicId: publicId }),
       });
 
-      setSignNowMode(created.mode);
-      setSignNowEmbedUrl(created.embedUrl ?? "");
-      setSignNowMessage(created.message ?? "");
+      if (isSafeEmbeddedSigningUrl(created.embedUrl)) {
+        setSignNowMode(created.mode);
+        setSignNowEmbedUrl(created.embedUrl ?? "");
+        setSignNowMessage(created.message ?? "");
+        return;
+      }
+
+      setSignNowMode("placeholder");
+      setSignNowEmbedUrl("");
+      setSignNowMessage(created.message ?? "OpenSign did not return a signer-specific document URL.");
     } catch (error) {
       setSignNowMessage(error instanceof Error ? error.message : "Could not prepare the OpenSign signing session.");
     } finally {
@@ -1292,9 +1306,9 @@ function ReservationFlow() {
                     </div>
                   ) : signNowMode === "placeholder" ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
-                      <h3 className="font-display text-2xl text-soil">OpenSign placeholder mode</h3>
+                      <h3 className="font-display text-2xl text-soil">Signing session unavailable</h3>
                       <p className="mt-3 text-slate-700">
-                        OpenSign host or template settings are still missing, so the embedded signing panel cannot load yet. Once the OpenSign stack is live on RackNerd, this step will render the agreement automatically.
+                        The app could not get a signer-specific agreement URL from OpenSign, so the setup or home screen was blocked instead of being shown to customers. Check the OpenSign API key, template ID, and template signer role.
                       </p>
                     </div>
                   ) : (
@@ -1308,7 +1322,7 @@ function ReservationFlow() {
                 <button
                   type="button"
                   onClick={() => navigate(`/reserve/payment?reservation=${reservationIdFromUrl}`)}
-                  disabled={reservationSummary?.signingStatus !== "COMPLETED" && signNowMode !== "placeholder"}
+                  disabled={reservationSummary?.signingStatus !== "COMPLETED"}
                   className="rounded-full bg-soil px-6 py-3 font-semibold text-white disabled:opacity-60"
                 >
                   Continue to payment
@@ -1491,6 +1505,20 @@ function normalizeReservationSummary<T extends ReservationSummary>(summary: T): 
     ...summary,
     signingStatus: summary.signingStatus ?? summary.docusealStatus,
   };
+}
+
+function isSafeEmbeddedSigningUrl(url: string | null | undefined) {
+  if (!url) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url, window.location.origin);
+    const normalizedPath = parsed.pathname.replace(/\/+$/, "");
+    return normalizedPath.length > 0 && normalizedPath !== "/";
+  } catch {
+    return false;
+  }
 }
 
 function getStoredAuthSession() {

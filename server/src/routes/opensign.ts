@@ -10,8 +10,24 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
 
 const createSigningSessionSchema = z.object({ reservationPublicId: z.string().min(1) });
 
+type OpenSignFlags = {
+  provider?: string;
+  embedUrl?: string | null;
+  documentId?: string | null;
+  signingLink?: string | null;
+  templateId?: string | null;
+  sessionId?: string | null;
+  tenantId?: string | null;
+  createdAt?: string | null;
+};
+
 function openSignConfigured() {
-  return Boolean(env.OPENSIGN_PUBLIC_URL && env.OPENSIGN_API_URL && env.OPENSIGN_TENANT_ID);
+  return Boolean(
+    env.OPENSIGN_PUBLIC_URL &&
+      env.OPENSIGN_API_URL &&
+      env.OPENSIGN_API_KEY &&
+      env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
+  );
 }
 
 router.post("/create-signing-session", asyncRoute(async (req, res) => {
@@ -30,7 +46,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
   }
 
   const existingFlags = getLegacySigningFlags(reservation.internalFlags);
-  if (reservation.docusealSubmissionId && existingFlags.embedUrl) {
+  if (reservation.docusealSubmissionId && isSafeOpenSignUrl(existingFlags.embedUrl)) {
     return res.json({
       mode: openSignConfigured() ? "live" : "placeholder",
       reservationPublicId: reservation.publicId,
@@ -38,43 +54,102 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
       embedUrl: existingFlags.embedUrl,
       status: reservation.docusealStatus,
       signedDocumentUrl: reservation.signedDocumentUrl ?? null,
-      message: openSignConfigured() ? "Existing OpenSign signing session loaded." : "Existing OpenSign placeholder session loaded.",
+      message: openSignConfigured()
+        ? "Existing OpenSign signing session loaded."
+        : "OpenSign is not fully configured yet, so the signing step is unavailable.",
     });
   }
 
-  const sessionId = reservation.docusealSubmissionId ?? `opensign_${reservation.publicId}`;
-  const embedUrl = existingFlags.embedUrl ?? buildFallbackSigningUrl(reservation.publicId);
-  const updated = await prisma.reservation.update({
-    where: { publicId: reservation.publicId },
-    data: {
-      docusealSubmissionId: sessionId,
-      docusealStatus: "SUBMISSION_CREATED",
-      status: ["DRAFT", "PENDING_PAYMENT"].includes(reservation.status) ? "AWAITING_SIGNATURE" : reservation.status,
-      internalFlags: {
-        ...getLegacyFlagsObject(reservation.internalFlags),
-        opensign: {
-          provider: "opensign",
-          embedUrl,
-          templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
-          sessionId,
-          tenantId: env.OPENSIGN_TENANT_ID ?? null,
+  if (!openSignConfigured()) {
+    await prisma.reservation.update({
+      where: { publicId: reservation.publicId },
+      data: {
+        docusealStatus: reservation.docusealStatus === "COMPLETED" ? reservation.docusealStatus : "ERROR",
+        status: reservation.docusealStatus === "COMPLETED" ? reservation.status : "AWAITING_SIGNATURE",
+        internalFlags: {
+          ...getLegacyFlagsObject(reservation.internalFlags),
+          opensign: {
+            ...existingFlags,
+            provider: "opensign",
+            embedUrl: null,
+            templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
+            tenantId: env.OPENSIGN_TENANT_ID ?? null,
+            configMissing: true,
+          },
         },
       },
-    },
-  });
+    });
 
-  return res.json({
-    mode: openSignConfigured() ? "live" : "placeholder",
-    reservation: updated,
-    reservationPublicId: reservation.publicId,
-    sessionId,
-    embedUrl,
-    status: updated.docusealStatus,
-    signedDocumentUrl: updated.signedDocumentUrl ?? null,
-    message: openSignConfigured()
-      ? "OpenSign is configured. The next step is wiring your exact OpenSign document template or API document-creation flow."
-      : "OpenSign is not fully configured yet, so the signing step is using placeholder mode.",
-  });
+    return res.json({
+      mode: "placeholder",
+      reservationPublicId: reservation.publicId,
+      sessionId: reservation.docusealSubmissionId ?? null,
+      embedUrl: null,
+      status: reservation.docusealStatus === "COMPLETED" ? reservation.docusealStatus : "ERROR",
+      signedDocumentUrl: reservation.signedDocumentUrl ?? null,
+      message: "OpenSign is not fully configured yet. Add the API URL, API key, and template ID before customers can sign.",
+    });
+  }
+
+  try {
+    const created = await createLiveSigningSession(reservation);
+    const updated = await prisma.reservation.update({
+      where: { publicId: reservation.publicId },
+      data: {
+        docusealSubmissionId: created.sessionId,
+        docusealStatus: "SENT",
+        status: ["DRAFT", "PENDING_PAYMENT", "AWAITING_SIGNATURE"].includes(reservation.status) ? "AWAITING_SIGNATURE" : reservation.status,
+        internalFlags: {
+          ...getLegacyFlagsObject(reservation.internalFlags),
+          opensign: {
+            provider: "opensign",
+            embedUrl: created.embedUrl,
+            documentId: created.documentId,
+            signingLink: created.embedUrl,
+            templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
+            sessionId: created.sessionId,
+            tenantId: env.OPENSIGN_TENANT_ID ?? null,
+            createdAt: new Date().toISOString(),
+          },
+        },
+      },
+    });
+
+    return res.json({
+      mode: "live",
+      reservation: updated,
+      reservationPublicId: updated.publicId,
+      sessionId: created.sessionId,
+      embedUrl: created.embedUrl,
+      status: updated.docusealStatus,
+      signedDocumentUrl: updated.signedDocumentUrl ?? null,
+      message: "OpenSign signing session is ready.",
+    });
+  } catch (error) {
+    await prisma.reservation.update({
+      where: { publicId: reservation.publicId },
+      data: {
+        docusealStatus: "ERROR",
+        status: "AWAITING_SIGNATURE",
+        internalFlags: {
+          ...getLegacyFlagsObject(reservation.internalFlags),
+          opensign: {
+            ...existingFlags,
+            provider: "opensign",
+            lastError: error instanceof Error ? error.message : "Could not create the OpenSign session.",
+            templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
+            tenantId: env.OPENSIGN_TENANT_ID ?? null,
+          },
+        },
+      },
+    });
+
+    return res.status(502).json({
+      error: error instanceof Error
+        ? error.message
+        : "OpenSign did not return a signer session. Check the template signer role, API key, and OpenSign API URL.",
+    });
+  }
 }));
 
 router.get("/signing-session-status", asyncRoute(async (req, res) => {
@@ -89,16 +164,41 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
   }
 
   const flags = getLegacySigningFlags(reservation.internalFlags);
+
+  if (reservation.docusealStatus === "COMPLETED" || reservation.signedDocumentUrl) {
+    return res.json({
+      mode: openSignConfigured() ? "live" : "placeholder",
+      reservationPublicId: reservation.publicId,
+      sessionId: reservation.docusealSubmissionId ?? null,
+      embedUrl: null,
+      status: reservation.docusealStatus,
+      signedDocumentUrl: reservation.signedDocumentUrl ?? null,
+      message: "The agreement has already been signed.",
+    });
+  }
+
+  if (isSafeOpenSignUrl(flags.embedUrl)) {
+    return res.json({
+      mode: openSignConfigured() ? "live" : "placeholder",
+      reservationPublicId: reservation.publicId,
+      sessionId: reservation.docusealSubmissionId ?? null,
+      embedUrl: flags.embedUrl,
+      status: reservation.docusealStatus,
+      signedDocumentUrl: reservation.signedDocumentUrl ?? null,
+      message: "OpenSign signing session is available.",
+    });
+  }
+
   return res.json({
     mode: openSignConfigured() ? "live" : "placeholder",
     reservationPublicId: reservation.publicId,
     sessionId: reservation.docusealSubmissionId ?? null,
-    embedUrl: flags.embedUrl ?? buildFallbackSigningUrl(reservation.publicId),
+    embedUrl: null,
     status: reservation.docusealStatus,
     signedDocumentUrl: reservation.signedDocumentUrl ?? null,
     message: openSignConfigured()
-      ? "OpenSign signing session is available."
-      : "OpenSign is not fully configured yet, so the signing step is using placeholder mode.",
+      ? "OpenSign is reachable, but no signer document link has been created yet."
+      : "OpenSign is not fully configured yet.",
   });
 }));
 
@@ -159,14 +259,262 @@ router.post("/webhook", asyncRoute(async (req, res) => {
   return res.json({ received: true });
 }));
 
-function buildFallbackSigningUrl(reservationPublicId: string) {
-  if (!env.OPENSIGN_PUBLIC_URL) {
+async function createLiveSigningSession(reservation: {
+  publicId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  weekendStartDate: Date;
+  weekendEndDate: Date;
+  jobsiteStreet: string;
+  jobsiteCity: string;
+  jobsiteState: string;
+  jobsiteZip: string;
+  colorado811Ticket: string | null;
+  workDescription: string | null;
+}) {
+  const apiBase = getOpenSignApiBase();
+  const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
+  const createPayload = {
+    title: `Tonka Time Rental Agreement ${reservation.publicId}`,
+    note: `Reservation ${reservation.publicId} for ${reservation.weekendStartDate.toISOString().slice(0, 10)} through ${reservation.weekendEndDate.toISOString().slice(0, 10)}`,
+    external_id: reservation.publicId,
+    sendInOrder: true,
+    signers: [
+      {
+        name: signerName,
+        email: reservation.email,
+        phone: reservation.phone,
+        role: "Customer",
+      },
+    ],
+    widgets: buildTemplateWidgetDefaults(reservation),
+    prefill: buildTemplatePrefill(reservation),
+  };
+
+  const createResponse = await fetchJson(`${apiBase}/createdocument/${encodeURIComponent(env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL!)}`, {
+    method: "POST",
+    headers: buildOpenSignHeaders(),
+    body: JSON.stringify(createPayload),
+  });
+
+  const documentId = extractDocumentId(createResponse);
+  if (!documentId) {
+    throw new Error("OpenSign created no document ID. Check that the template has at least one signer role and that the role name matches `Customer`.");
+  }
+
+  const signingLinkResponse = await fetchJson(`${apiBase}/signinglinks/${encodeURIComponent(documentId)}`, {
+    method: "GET",
+    headers: buildOpenSignHeaders(),
+  });
+
+  const embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinkResponse));
+  if (!isSafeOpenSignUrl(embedUrl)) {
+    throw new Error("OpenSign did not return a signer document link. The template may be missing signers, or the signer role may not match `Customer`.");
+  }
+
+  return {
+    sessionId: documentId,
+    documentId,
+    embedUrl,
+  };
+}
+
+function buildTemplateWidgetDefaults(reservation: {
+  firstName: string;
+  lastName: string;
+  email: string;
+}) {
+  return [
+    { name: "name", readonly: false, default: `${reservation.firstName} ${reservation.lastName}`.trim() },
+    { name: "email", readonly: false, default: reservation.email },
+    { name: "company", readonly: false, default: "Tonka Time Rentals customer" },
+    { name: "job title", readonly: false, default: "Customer" },
+  ];
+}
+
+function buildTemplatePrefill(reservation: {
+  publicId: string;
+  weekendStartDate: Date;
+  weekendEndDate: Date;
+  jobsiteStreet: string;
+  jobsiteCity: string;
+  jobsiteState: string;
+  jobsiteZip: string;
+  colorado811Ticket: string | null;
+  workDescription: string | null;
+}) {
+  return [
+    { name: "reservation_id", response: reservation.publicId },
+    { name: "weekend_start", response: reservation.weekendStartDate.toISOString().slice(0, 10) },
+    { name: "weekend_end", response: reservation.weekendEndDate.toISOString().slice(0, 10) },
+    { name: "jobsite_address", response: `${reservation.jobsiteStreet}, ${reservation.jobsiteCity}, ${reservation.jobsiteState} ${reservation.jobsiteZip}` },
+    { name: "ticket_811", response: reservation.colorado811Ticket ?? "" },
+    { name: "work_description", response: reservation.workDescription ?? "" },
+  ];
+}
+
+function getOpenSignApiBase() {
+  return env.OPENSIGN_API_URL!.replace(/\/+$/, "");
+}
+
+function buildOpenSignHeaders() {
+  return {
+    "Content-Type": "application/json",
+    "x-api-token": env.OPENSIGN_API_KEY!,
+  };
+}
+
+async function fetchJson(url: string, init: RequestInit) {
+  const response = await fetch(url, init);
+  const text = await response.text();
+  let data: unknown = null;
+
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (!response.ok) {
+    const detail =
+      typeof data === "string"
+        ? data
+        : typeof data === "object" && data !== null && "message" in data && typeof (data as { message?: unknown }).message === "string"
+          ? (data as { message: string }).message
+          : typeof data === "object" && data !== null && "error" in data && typeof (data as { error?: unknown }).error === "string"
+            ? (data as { error: string }).error
+            : `OpenSign request failed with HTTP ${response.status}.`;
+    throw new Error(detail);
+  }
+
+  return data;
+}
+
+function extractDocumentId(payload: unknown): string | null {
+  return firstString([
+    getNestedString(payload, ["id"]),
+    getNestedString(payload, ["objectId"]),
+    getNestedString(payload, ["documentId"]),
+    getNestedString(payload, ["document_id"]),
+    getNestedString(payload, ["result", "id"]),
+    getNestedString(payload, ["result", "objectId"]),
+    getNestedString(payload, ["result", "documentId"]),
+    getNestedString(payload, ["data", "id"]),
+    getNestedString(payload, ["data", "objectId"]),
+    getNestedString(payload, ["data", "documentId"]),
+  ]);
+}
+
+function extractSigningLink(payload: unknown): string | null {
+  const direct = firstString([
+    getNestedString(payload, ["url"]),
+    getNestedString(payload, ["signing_url"]),
+    getNestedString(payload, ["signingUrl"]),
+    getNestedString(payload, ["result", "url"]),
+    getNestedString(payload, ["result", "signing_url"]),
+    getNestedString(payload, ["data", "url"]),
+    getNestedString(payload, ["data", "signing_url"]),
+  ]);
+  if (direct) {
+    return direct;
+  }
+
+  const collections = [
+    getNestedArray(payload, ["links"]),
+    getNestedArray(payload, ["signingLinks"]),
+    getNestedArray(payload, ["signers"]),
+    getNestedArray(payload, ["result", "links"]),
+    getNestedArray(payload, ["result", "signingLinks"]),
+    getNestedArray(payload, ["result", "signers"]),
+    getNestedArray(payload, ["data", "links"]),
+    getNestedArray(payload, ["data", "signingLinks"]),
+    getNestedArray(payload, ["data", "signers"]),
+  ];
+
+  for (const entry of collections) {
+    if (!entry) {
+      continue;
+    }
+
+    for (const item of entry) {
+      const found = firstString([
+        getNestedString(item, ["url"]),
+        getNestedString(item, ["signing_url"]),
+        getNestedString(item, ["signingUrl"]),
+        getNestedString(item, ["link"]),
+      ]);
+      if (found) {
+        return found;
+      }
+    }
+  }
+
+  return null;
+}
+
+function getNestedString(payload: unknown, path: string[]) {
+  let current: unknown = payload;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return typeof current === "string" && current.trim() ? current.trim() : null;
+}
+
+function getNestedArray(payload: unknown, path: string[]) {
+  let current: unknown = payload;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return Array.isArray(current) ? current : null;
+}
+
+function firstString(values: Array<string | null | undefined>) {
+  return values.find((value) => typeof value === "string" && value.trim()) ?? null;
+}
+
+function absolutizeOpenSignUrl(url: string | null) {
+  if (!url) {
     return null;
   }
 
-  const base = env.OPENSIGN_PUBLIC_URL.replace(/\/+$/, "");
-  const tenant = env.OPENSIGN_TENANT_ID ? `?tenant=${encodeURIComponent(env.OPENSIGN_TENANT_ID)}&reservation=${encodeURIComponent(reservationPublicId)}` : `?reservation=${encodeURIComponent(reservationPublicId)}`;
-  return `${base}${tenant}`;
+  try {
+    return new URL(url, env.OPENSIGN_PUBLIC_URL).toString();
+  } catch {
+    return null;
+  }
+}
+
+function isSafeOpenSignUrl(url: string | null | undefined) {
+  if (!url || !env.OPENSIGN_PUBLIC_URL) {
+    return false;
+  }
+
+  try {
+    const publicBase = new URL(env.OPENSIGN_PUBLIC_URL);
+    const candidate = new URL(url, env.OPENSIGN_PUBLIC_URL);
+    if (candidate.origin !== publicBase.origin) {
+      return false;
+    }
+
+    const normalizedPath = candidate.pathname.replace(/\/+$/, "");
+    if (!normalizedPath || normalizedPath === "" || normalizedPath === "/") {
+      return false;
+    }
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function getLegacyFlagsObject(flags: unknown) {
@@ -177,11 +525,11 @@ function getLegacyFlagsObject(flags: unknown) {
   return flags as Record<string, unknown>;
 }
 
-function getLegacySigningFlags(flags: unknown) {
+function getLegacySigningFlags(flags: unknown): OpenSignFlags {
   const objectFlags = getLegacyFlagsObject(flags);
   const openSign = objectFlags.opensign;
   if (openSign && typeof openSign === "object" && !Array.isArray(openSign)) {
-    return openSign as { embedUrl?: string | null };
+    return openSign as OpenSignFlags;
   }
 
   return { embedUrl: null };
