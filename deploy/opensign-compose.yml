@@ -6,8 +6,6 @@ services:
       - .env.opensign
     environment:
       NODE_ENV: production
-      SERVER_URL: ${HOST_URL}/api/app
-      PUBLIC_URL: ${HOST_URL}
     depends_on:
       - opensign-mongo
     volumes:
