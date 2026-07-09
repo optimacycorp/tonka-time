@@ -106,6 +106,32 @@ export async function cancelReservationByPublicId({
   };
 }
 
+export async function deleteFakeReservationByPublicId(publicId: string) {
+  const reservation = await prisma.reservation.findUnique({
+    where: { publicId },
+  });
+
+  if (!reservation) {
+    throw new Error("Reservation not found.");
+  }
+
+  const flags = getFlagsObject(reservation.internalFlags);
+  const fakePay = flags.fakePay;
+  const isFakeReservation =
+    reservation.email.toLowerCase() === "fakepay@tonkatimerentals.com" ||
+    (fakePay && typeof fakePay === "object" && !Array.isArray(fakePay));
+
+  if (!isFakeReservation) {
+    throw new Error("Only fake-pay reservations can be deleted from the admin dashboard.");
+  }
+
+  await prisma.reservation.delete({
+    where: { publicId },
+  });
+
+  return { deleted: true, publicId };
+}
+
 function getFlagsObject(flags: unknown) {
   if (!flags || typeof flags !== "object" || Array.isArray(flags)) {
     return {};

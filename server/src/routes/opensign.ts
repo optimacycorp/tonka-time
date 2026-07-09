@@ -25,8 +25,8 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
     return res.status(404).json({ error: "Reservation not found" });
   }
 
-  if (!["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "CONFIRMED"].includes(reservation.status)) {
-    return res.status(409).json({ error: "The agreement can only be created after payment is complete." });
+  if (["CANCELLED", "EXPIRED"].includes(reservation.status)) {
+    return res.status(409).json({ error: "The agreement cannot be created for a cancelled or expired reservation." });
   }
 
   const existingFlags = getLegacySigningFlags(reservation.internalFlags);
@@ -49,7 +49,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
     data: {
       docusealSubmissionId: sessionId,
       docusealStatus: "SUBMISSION_CREATED",
-      status: reservation.status === "PAYMENT_RECEIVED" ? "AWAITING_SIGNATURE" : reservation.status,
+      status: ["DRAFT", "PENDING_PAYMENT"].includes(reservation.status) ? "AWAITING_SIGNATURE" : reservation.status,
       internalFlags: {
         ...getLegacyFlagsObject(reservation.internalFlags),
         opensign: {
@@ -140,8 +140,16 @@ router.post("/webhook", asyncRoute(async (req, res) => {
         where: { publicId: reservationPublicId },
         data: {
           docusealStatus: eventType.includes("complete") || eventType.includes("signed") ? "COMPLETED" : reservation.docusealStatus,
-          status: eventType.includes("complete") || eventType.includes("signed") ? "CONFIRMED" : reservation.status,
-          confirmedAt: eventType.includes("complete") || eventType.includes("signed") ? new Date() : reservation.confirmedAt,
+          status: eventType.includes("complete") || eventType.includes("signed")
+            ? reservation.paymentStatus === "PAID"
+              ? "CONFIRMED"
+              : "PENDING_PAYMENT"
+            : reservation.status,
+          confirmedAt: eventType.includes("complete") || eventType.includes("signed")
+            ? reservation.paymentStatus === "PAID"
+              ? new Date()
+              : reservation.confirmedAt
+            : reservation.confirmedAt,
           signedDocumentUrl: signedDocumentUrl ?? reservation.signedDocumentUrl,
         },
       });

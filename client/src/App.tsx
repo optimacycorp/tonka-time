@@ -52,8 +52,9 @@ type CheckoutResponse = {
   clientSecret?: string | null;
   publishableKey?: string | null;
   sessionId?: string | null;
-  mode: "live" | "placeholder";
+  mode: "live" | "placeholder" | "fake";
   message: string;
+  reservation?: ReservationSummary | null;
 };
 
 type CheckoutSessionStatusResponse = {
@@ -107,6 +108,7 @@ type AccountReservation = ReservationSummary & {
   paymentStatus?: string;
   createdAt?: string;
   updatedAt?: string;
+  internalFlags?: Record<string, unknown> | null;
 };
 
 type NotificationItem = {
@@ -148,8 +150,8 @@ const reservationSteps = [
   { path: "/reserve/checklist", label: "Checklist" },
   { path: "/reserve/waiver", label: "Waiver" },
   { path: "/reserve/review", label: "Review" },
-  { path: "/reserve/payment", label: "Payment" },
   { path: "/reserve/sign", label: "Sign" },
+  { path: "/reserve/payment", label: "Payment" },
   { path: "/reserve/confirmation", label: "Confirmation" },
 ];
 
@@ -541,7 +543,7 @@ function ReservationFlow() {
   const [reservationSummary, setReservationSummary] = useState<ReservationSummary | null>(null);
   const [checkoutClientSecret, setCheckoutClientSecret] = useState("");
   const [checkoutPublishableKey, setCheckoutPublishableKey] = useState("");
-  const [checkoutMode, setCheckoutMode] = useState<"live" | "placeholder" | "">("");
+  const [checkoutMode, setCheckoutMode] = useState<"live" | "placeholder" | "fake" | "">("");
   const [paymentStatusMessage, setPaymentStatusMessage] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [signNowMode, setSignNowMode] = useState<"live" | "placeholder" | "">("");
@@ -694,6 +696,12 @@ function ReservationFlow() {
       });
       setCheckoutMode(data.mode);
       setPaymentStatusMessage(data.message);
+      if (data.reservation) {
+        setReservationSummary(normalizeReservationSummary(data.reservation));
+      }
+      if (data.mode === "fake") {
+        return;
+      }
       if (data.mode === "live" && data.clientSecret && data.publishableKey) {
         setCheckoutClientSecret(data.clientSecret);
         setCheckoutPublishableKey(data.publishableKey);
@@ -710,7 +718,7 @@ function ReservationFlow() {
       setPaymentLoading(true);
       const data = await requestJson<CheckoutSessionStatusResponse>(`/api/stripe/checkout-session-status?sessionId=${encodeURIComponent(sessionId)}`);
       if (data.status === "complete" && data.paymentStatus === "paid") {
-        navigate(`/reserve/sign?reservation=${reservationIdFromUrl ?? draft.publicId}`);
+        navigate(`/reserve/confirmation?reservation=${reservationIdFromUrl ?? draft.publicId}`);
         return;
       }
 
@@ -864,7 +872,7 @@ function ReservationFlow() {
         setSaving(true);
         const saved = await saveReservation();
         if (!draft.publicId && saved.publicId) {
-          navigate(`/reserve/payment?reservation=${saved.publicId}`);
+          navigate(`/reserve/sign?reservation=${saved.publicId}`);
           return;
         }
       } catch (error) {
@@ -1172,10 +1180,10 @@ function ReservationFlow() {
 
           {location.pathname === "/reserve/payment" && (
             <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
-              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 7</p>
+              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 8</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Secure payment</h2>
               <p className="mt-4 text-slate-700">
-                Pay without leaving the reservation flow. Stripe handles the secure payment form here on the page, while Tonka Time keeps the pricing and next steps visible beside it.
+                Payment is presented only after the checklist and waiver agreement have been signed. Stripe handles the secure payment form here on the page, while Tonka Time keeps the pricing and next steps visible beside it.
               </p>
               <div className="mt-6 grid gap-6 xl:grid-cols-[0.42fr_0.58fr]">
                 <div className="rounded-[1.5rem] bg-slate-950 p-6 text-white">
@@ -1202,6 +1210,13 @@ function ReservationFlow() {
                       publishableKey={checkoutPublishableKey}
                       reservationPublicId={reservationIdFromUrl ?? draft.publicId ?? ""}
                     />
+                  ) : checkoutMode === "fake" ? (
+                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <h3 className="font-display text-2xl text-soil">Fake payment simulation complete</h3>
+                      <p className="mt-3 text-slate-700">
+                        Because `FAKE_PAY=TRUE` and this reservation used `fakepay@tonkatimerentals.com`, the system simulated a successful paid reservation without contacting Stripe.
+                      </p>
+                    </div>
                   ) : checkoutMode === "placeholder" ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
                       <h3 className="font-display text-2xl text-soil">Stripe placeholder mode</h3>
@@ -1217,13 +1232,18 @@ function ReservationFlow() {
                 </div>
               </div>
               <div className="mt-6 flex flex-wrap gap-3">
-                {checkoutMode === "placeholder" && (
-                  <button type="button" onClick={() => navigate(`/reserve/sign?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
-                    Continue to signing
+                {checkoutMode === "fake" && (
+                  <button type="button" onClick={() => navigate(`/reserve/confirmation?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
+                    Continue to confirmation
                   </button>
                 )}
-                <button type="button" onClick={() => navigate("/reserve/review")} className="rounded-full border border-soil px-6 py-3 font-semibold text-soil">
-                  Back to review
+                {checkoutMode === "placeholder" && (
+                  <button type="button" onClick={() => navigate(`/reserve/confirmation?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
+                    Continue to confirmation
+                  </button>
+                )}
+                <button type="button" onClick={() => navigate(`/reserve/sign?reservation=${reservationIdFromUrl}`)} className="rounded-full border border-soil px-6 py-3 font-semibold text-soil">
+                  Back to signing
                 </button>
               </div>
             </div>
@@ -1231,7 +1251,7 @@ function ReservationFlow() {
 
           {location.pathname === "/reserve/sign" && (
             <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
-              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 8</p>
+              <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 7</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Agreement signing</h2>
               <p className="mt-4 text-slate-700">
                 Review and sign the rental agreement without leaving the reservation flow. The signing step is now aligned to self-hosted OpenSign so the agreement workflow stays on your RackNerd stack.
@@ -1281,8 +1301,13 @@ function ReservationFlow() {
                 </div>
               </div>
               <div className="mt-6">
-                <button type="button" onClick={() => navigate(`/reserve/confirmation?reservation=${reservationIdFromUrl}`)} className="rounded-full bg-soil px-6 py-3 font-semibold text-white">
-                  Continue to confirmation
+                <button
+                  type="button"
+                  onClick={() => navigate(`/reserve/payment?reservation=${reservationIdFromUrl}`)}
+                  disabled={reservationSummary?.signingStatus !== "COMPLETED" && signNowMode !== "placeholder"}
+                  className="rounded-full bg-soil px-6 py-3 font-semibold text-white disabled:opacity-60"
+                >
+                  Continue to payment
                 </button>
               </div>
             </div>
@@ -1818,6 +1843,24 @@ function AdminPage() {
     }
   }
 
+  async function handleAdminDelete(publicId: string) {
+    const confirmed = window.confirm(`Delete fake reservation ${publicId}? This permanently removes the reservation record.`);
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await requestJson(`/api/admin/reservations/${publicId}`, { method: "DELETE" });
+      setMessage(`Fake reservation ${publicId} deleted.`);
+      await loadAdminData();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete this fake reservation.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
   return (
     <SimplePage title="Admin Portal" intro="This dashboard now uses authenticated admin access so orders, payment state, and cancellation/refund actions live behind the seeded Tonka admin account.">
       {error && <p className="mb-6 rounded-2xl bg-rose-50 px-4 py-3 text-sm text-rose-700">{error}</p>}
@@ -1857,6 +1900,10 @@ function AdminPage() {
                 <p className="text-slate-600">{loading ? "Loading orders..." : "No reservations found."}</p>
               ) : (
                 reservations.map((order) => (
+                  (() => {
+                    const fakePayFlags = order.internalFlags && typeof order.internalFlags === "object" ? (order.internalFlags as Record<string, unknown>).fakePay : null;
+                    const isFakeReservation = order.email?.toLowerCase() === "fakepay@tonkatimerentals.com" || Boolean(fakePayFlags);
+                    return (
                   <article key={order.id} className="rounded-[1.5rem] border border-black/5 bg-sky p-5">
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
@@ -1867,11 +1914,18 @@ function AdminPage() {
                         <p className="mt-2 text-sm text-slate-700">Payment status: {order.paymentStatus ?? "Not started"}</p>
                         <p className="mt-2 text-sm text-slate-700">Agreement status: {order.signingStatus ?? "Not started"}</p>
                       </div>
-                      {order.status !== "CANCELLED" && (
-                        <button type="button" onClick={() => void handleAdminCancel(order.publicId ?? "")} className="rounded-full border border-rose-300 px-5 py-3 font-semibold text-rose-700">
-                          Cancel and refund
-                        </button>
-                      )}
+                      <div className="flex flex-wrap gap-3">
+                        {order.status !== "CANCELLED" && (
+                          <button type="button" onClick={() => void handleAdminCancel(order.publicId ?? "")} className="rounded-full border border-rose-300 px-5 py-3 font-semibold text-rose-700">
+                            Cancel and refund
+                          </button>
+                        )}
+                        {isFakeReservation && (
+                          <button type="button" onClick={() => void handleAdminDelete(order.publicId ?? "")} className="rounded-full border border-slate-400 px-5 py-3 font-semibold text-slate-700">
+                            Delete fake reservation
+                          </button>
+                        )}
+                      </div>
                     </div>
                     {order.notifications && order.notifications.length > 0 && (
                       <div className="mt-4 rounded-[1.25rem] bg-white p-4">
@@ -1884,6 +1938,8 @@ function AdminPage() {
                       </div>
                     )}
                   </article>
+                    );
+                  })()
                 ))
               )}
             </div>

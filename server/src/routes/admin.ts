@@ -2,7 +2,7 @@ import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
-import { cancelReservationByPublicId, serializeReservation } from "../lib/orders.js";
+import { cancelReservationByPublicId, deleteFakeReservationByPublicId, serializeReservation } from "../lib/orders.js";
 
 const router = Router();
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
@@ -68,6 +68,11 @@ router.post("/reservations/:publicId/cancel", asyncRoute(async (req, res) => {
     actorUserId: res.locals.user.id as string,
   });
 
+  return res.json(result);
+}));
+
+router.delete("/reservations/:publicId", asyncRoute(async (req, res) => {
+  const result = await deleteFakeReservationByPublicId(String(req.params.publicId));
   return res.json(result);
 }));
 

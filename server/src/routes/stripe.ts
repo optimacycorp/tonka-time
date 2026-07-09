@@ -14,6 +14,7 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
 const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 const minimumMachineInventory = 2;
 const reservedStatuses = ["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "AWAITING_ADMIN_REVIEW", "CONFIRMED"] as const;
+const fakePayEmail = "fakepay@tonkatimerentals.com";
 
 router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   const parsed = z.object({ reservationPublicId: z.string().min(1) }).safeParse(req.body);
@@ -60,6 +61,10 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
     damageWaiverChoice: reservation.damageWaiverChoice,
   });
 
+  if (reservation.docusealStatus !== "COMPLETED") {
+    return res.status(409).json({ error: "You must complete the checklist and waiver signing before payment." });
+  }
+
   const updateData = {
     paymentStatus: "CHECKOUT_CREATED" as const,
     status: "PENDING_PAYMENT" as const,
@@ -69,6 +74,36 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
     depositCents: pricing.depositCents,
     totalDueCents: pricing.totalDueCents,
   };
+
+  if (env.FAKE_PAY && reservation.email.toLowerCase() === fakePayEmail) {
+    const updated = await prisma.reservation.update({
+      where: { publicId: reservation.publicId },
+      data: {
+        ...updateData,
+        paymentStatus: "PAID",
+        status: "CONFIRMED",
+        confirmedAt: reservation.confirmedAt ?? new Date(),
+        stripeCheckoutSessionId: `fake_checkout_${reservation.publicId}`,
+        stripePaymentIntentId: `fake_payment_${reservation.publicId}`,
+        internalFlags: {
+          ...(reservation.internalFlags && typeof reservation.internalFlags === "object" && !Array.isArray(reservation.internalFlags) ? reservation.internalFlags : {}),
+          fakePay: {
+            enabled: true,
+            email: reservation.email,
+            simulatedAt: new Date().toISOString(),
+          },
+        },
+      },
+    });
+
+    return res.json({
+      checkoutUrl: `/reserve/payment?reservation=${reservation.publicId}`,
+      sessionId: updated.stripeCheckoutSessionId,
+      mode: "fake",
+      message: "Fake pay mode is enabled. This reservation has been marked as paid without Stripe.",
+      reservation: updated,
+    });
+  }
 
   if (!stripe || !env.STRIPE_PUBLISHABLE_KEY) {
     const updated = await prisma.reservation.update({
