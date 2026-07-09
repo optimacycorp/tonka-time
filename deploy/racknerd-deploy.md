@@ -109,6 +109,11 @@ Then set these app env vars in `.env.production`:
 - `OPENSIGN_API_KEY=...` if you use API-key-based document creation
 - `OPENSIGN_WEBHOOK_SECRET=...` if you use webhook validation
 
+Important nginx note:
+
+- OpenSign's backend is mounted at `/app`, so `https://sign.tonkatimerentals.com/api/app` must proxy to `http://127.0.0.1:8081/app`
+- If `https://sign.tonkatimerentals.com` loads but `https://sign.tonkatimerentals.com/api/app` returns `502`, the nginx site file is usually still pointing at `/api/` instead of `/app`
+
 Current code status:
 
 - The Tonka app is now pointed at OpenSign endpoints and OpenSign-facing messaging.
