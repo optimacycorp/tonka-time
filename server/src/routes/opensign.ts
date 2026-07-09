@@ -25,7 +25,7 @@ function openSignConfigured() {
   return Boolean(
     env.OPENSIGN_PUBLIC_URL &&
       env.OPENSIGN_API_URL &&
-      env.OPENSIGN_API_KEY &&
+      (env.OPENSIGN_API_KEY || env.OPENSIGN_MASTER_KEY) &&
       env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
   );
 }
@@ -87,7 +87,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
       embedUrl: null,
       status: reservation.docusealStatus === "COMPLETED" ? reservation.docusealStatus : "ERROR",
       signedDocumentUrl: reservation.signedDocumentUrl ?? null,
-      message: "OpenSign is not fully configured yet. Add the API URL, API key, and template ID before customers can sign.",
+      message: "OpenSign is not fully configured yet. Add the API URL, template ID, and either an API key or master key before customers can sign.",
     });
   }
 
@@ -147,7 +147,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
     return res.status(502).json({
       error: error instanceof Error
         ? error.message
-        : "OpenSign did not return a signer session. Check the template signer role, API key, and OpenSign API URL.",
+        : "OpenSign did not return a signer session. Check the template signer role, auth key configuration, and OpenSign API URL.",
     });
   }
 }));
@@ -376,10 +376,20 @@ function getOpenSignApiBase() {
 }
 
 function buildOpenSignHeaders() {
-  return {
+  const headers: Record<string, string> = {
     "Content-Type": "application/json",
-    "x-api-token": env.OPENSIGN_API_KEY!,
   };
+
+  if (env.OPENSIGN_API_KEY) {
+    headers["x-api-token"] = env.OPENSIGN_API_KEY;
+  }
+
+  if (env.OPENSIGN_MASTER_KEY) {
+    headers["X-Parse-Application-Id"] = env.OPENSIGN_APP_ID;
+    headers["X-Parse-Master-Key"] = env.OPENSIGN_MASTER_KEY;
+  }
+
+  return headers;
 }
 
 async function fetchJson(url: string, init: RequestInit) {

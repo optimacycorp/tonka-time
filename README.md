@@ -39,6 +39,7 @@ Rotate this password immediately in production after the first deploy.
 
 - Phone authentication works through a one-time code flow. If Twilio credentials are not configured yet, the API returns a dev-only code so the flow can still be tested.
 - Reservation cancellation updates the reservation status, releases the calendar slot, marks refund state, and logs customer/admin notifications.
+- Self-hosted OpenSign can authenticate either with `OPENSIGN_API_KEY` or, when the hosted UI does not expose API tokens, with `OPENSIGN_MASTER_KEY` plus `OPENSIGN_APP_ID`.
 
 ## Deployment
 
