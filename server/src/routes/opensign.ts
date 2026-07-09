@@ -273,6 +273,9 @@ async function createLiveSigningSession(reservation: {
   jobsiteZip: string;
   colorado811Ticket: string | null;
   workDescription: string | null;
+  isPropertyOwner: boolean | null;
+  ownerPermission: boolean | null;
+  damageWaiverChoice: string;
 }) {
   const apiBase = getOpenSignApiBase();
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
@@ -325,10 +328,12 @@ function buildTemplateWidgetDefaults(reservation: {
   firstName: string;
   lastName: string;
   email: string;
+  phone: string;
 }) {
   return [
     { name: "name", readonly: false, default: `${reservation.firstName} ${reservation.lastName}`.trim() },
     { name: "email", readonly: false, default: reservation.email },
+    { name: "phone", readonly: false, default: reservation.phone },
     { name: "company", readonly: false, default: "Tonka Time Rentals customer" },
     { name: "job title", readonly: false, default: "Customer" },
   ];
@@ -344,14 +349,25 @@ function buildTemplatePrefill(reservation: {
   jobsiteZip: string;
   colorado811Ticket: string | null;
   workDescription: string | null;
+  isPropertyOwner: boolean | null;
+  ownerPermission: boolean | null;
+  damageWaiverChoice: string;
 }) {
+  const [workCategory, ...workNotes] = (reservation.workDescription ?? "").split(":");
+  const normalizedCategory = workNotes.length > 0 ? workCategory.trim() : "";
+  const normalizedNotes = workNotes.length > 0 ? workNotes.join(":").trim() : reservation.workDescription ?? "";
+
   return [
     { name: "reservation_id", response: reservation.publicId },
     { name: "weekend_start", response: reservation.weekendStartDate.toISOString().slice(0, 10) },
     { name: "weekend_end", response: reservation.weekendEndDate.toISOString().slice(0, 10) },
     { name: "jobsite_address", response: `${reservation.jobsiteStreet}, ${reservation.jobsiteCity}, ${reservation.jobsiteState} ${reservation.jobsiteZip}` },
     { name: "ticket_811", response: reservation.colorado811Ticket ?? "" },
-    { name: "work_description", response: reservation.workDescription ?? "" },
+    { name: "work_category", response: normalizedCategory },
+    { name: "work_description", response: normalizedNotes },
+    { name: "damage_waiver_choice", response: reservation.damageWaiverChoice },
+    { name: "is_property_owner", response: reservation.isPropertyOwner == null ? "" : reservation.isPropertyOwner ? "Yes" : "No" },
+    { name: "owner_permission", response: reservation.ownerPermission == null ? "" : reservation.ownerPermission ? "Yes" : "No" },
   ];
 }
 
