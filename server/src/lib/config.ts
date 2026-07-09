@@ -29,6 +29,8 @@ const envSchema = z.object({
   OPENSIGN_TENANT_ID: z.string().optional(),
   OPENSIGN_API_KEY: z.string().optional(),
   OPENSIGN_MASTER_KEY: z.string().optional(),
+  OPENSIGN_USERNAME: z.string().optional(),
+  OPENSIGN_PASSWORD: z.string().optional(),
   OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL: z.string().optional(),
   OPENSIGN_WEBHOOK_SECRET: z.string().optional(),
   CORE_DELIVERY_FEE_CENTS: z.coerce.number().default(10000),

@@ -107,6 +107,7 @@ Then set these app env vars in `.env.production`:
 - `OPENSIGN_TENANT_ID=...`
 - `OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL=...`
 - `OPENSIGN_API_KEY=...` if you use API-key-based document creation
+- `OPENSIGN_USERNAME=...` and `OPENSIGN_PASSWORD=...` for an OpenSign admin account when using the self-hosted Parse cloud-function flow
 - `OPENSIGN_WEBHOOK_SECRET=...` if you use webhook validation
 
 Important nginx note:

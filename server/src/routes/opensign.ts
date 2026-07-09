@@ -30,6 +30,10 @@ function openSignConfigured() {
   );
 }
 
+function openSignHasAdminSessionAuth() {
+  return Boolean(env.OPENSIGN_USERNAME && env.OPENSIGN_PASSWORD && env.OPENSIGN_APP_ID);
+}
+
 router.post("/create-signing-session", asyncRoute(async (req, res) => {
   const parsed = createSigningSessionSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -277,6 +281,37 @@ async function createLiveSigningSession(reservation: {
   ownerPermission: boolean | null;
   damageWaiverChoice: string;
 }) {
+  if (openSignHasAdminSessionAuth()) {
+    return createLiveSigningSessionViaAdminSession(reservation);
+  }
+
+  if (!env.OPENSIGN_API_KEY) {
+    throw new Error(
+      "OpenSign needs either OPENSIGN_USERNAME/OPENSIGN_PASSWORD for admin-session document creation or a working OPENSIGN_API_KEY flow.",
+    );
+  }
+
+  return createLiveSigningSessionViaLegacyApi(reservation);
+}
+
+async function createLiveSigningSessionViaLegacyApi(reservation: {
+  publicId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  weekendStartDate: Date;
+  weekendEndDate: Date;
+  jobsiteStreet: string;
+  jobsiteCity: string;
+  jobsiteState: string;
+  jobsiteZip: string;
+  colorado811Ticket: string | null;
+  workDescription: string | null;
+  isPropertyOwner: boolean | null;
+  ownerPermission: boolean | null;
+  damageWaiverChoice: string;
+}) {
   const apiBase = getOpenSignApiBase();
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
   const createPayload = {
@@ -324,6 +359,142 @@ async function createLiveSigningSession(reservation: {
   };
 }
 
+async function createLiveSigningSessionViaAdminSession(reservation: {
+  publicId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  weekendStartDate: Date;
+  weekendEndDate: Date;
+  jobsiteStreet: string;
+  jobsiteCity: string;
+  jobsiteState: string;
+  jobsiteZip: string;
+  colorado811Ticket: string | null;
+  workDescription: string | null;
+  isPropertyOwner: boolean | null;
+  ownerPermission: boolean | null;
+  damageWaiverChoice: string;
+}) {
+  const apiBase = getOpenSignApiBase();
+  const sessionToken = await loginOpenSignAdmin();
+  const adminUser = await fetchJson(`${apiBase}/users/me`, {
+    method: "GET",
+    headers: {
+      ...buildOpenSignHeaders(),
+      "X-Parse-Session-Token": sessionToken,
+    },
+  });
+
+  const adminUserId = firstString([
+    getNestedString(adminUser, ["objectId"]),
+    getNestedString(adminUser, ["result", "objectId"]),
+  ]);
+
+  if (!adminUserId) {
+    throw new Error("OpenSign login succeeded, but the admin user ID could not be read from /users/me.");
+  }
+
+  const template = await fetchJson(
+    `${apiBase}/classes/contracts_Template/${encodeURIComponent(env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL!)}`,
+    {
+      method: "GET",
+      headers: buildOpenSignHeaders(),
+    },
+  );
+
+  const templateUrl = firstString([
+    getNestedString(template, ["URL"]),
+    getNestedString(template, ["url"]),
+  ]);
+
+  if (!templateUrl) {
+    throw new Error("The OpenSign template exists, but it does not expose a source PDF URL.");
+  }
+
+  const templateName =
+    firstString([getNestedString(template, ["Name"]), getNestedString(template, ["name"])]) ??
+    `Tonka Time Rental Agreement ${reservation.publicId}`;
+
+  const signers = buildOpenSignDocumentSigners(
+    getNestedArray(template, ["Signers"]),
+    reservation,
+    adminUserId,
+  );
+  const placeholders = buildOpenSignDocumentPlaceholders(
+    getNestedArray(template, ["Placeholders"]),
+    reservation,
+  );
+
+  const documentPayload: Record<string, unknown> = {
+    Name: `${templateName} ${reservation.publicId}`.trim(),
+    URL: templateUrl,
+    Note: `Reservation ${reservation.publicId} for ${reservation.weekendStartDate.toISOString().slice(0, 10)} through ${reservation.weekendEndDate.toISOString().slice(0, 10)}`,
+    Description: `Tonka Time rental agreement for ${reservation.email}`,
+    ExtUserPtr: {
+      __type: "Pointer",
+      className: "_User",
+      objectId: adminUserId,
+    },
+    CreatedBy: {
+      __type: "Pointer",
+      className: "_User",
+      objectId: adminUserId,
+    },
+    SentToOthers: true,
+    SendinOrder: true,
+    AllowModifications: false,
+    AutomaticReminders: true,
+    NotifyOnSignatures: true,
+    IsEnableOTP: false,
+    TemplateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
+    Signers: signers,
+    Placeholders: placeholders,
+  };
+
+  const passthroughKeys = ["SignatureType", "Bcc", "Cc", "PenColors", "RemindOnceInEvery", "TimeToCompleteDays"] as const;
+  for (const key of passthroughKeys) {
+    const value = getNestedValue(template, [key]);
+    if (value != null) {
+      documentPayload[key] = value;
+    }
+  }
+
+  const createResponse = await fetchJson(`${apiBase}/functions/createdocumentfromapp`, {
+    method: "POST",
+    headers: {
+      ...buildOpenSignHeaders(),
+      "X-Parse-Session-Token": sessionToken,
+    },
+    body: JSON.stringify({ document: documentPayload }),
+  });
+
+  const documentId = extractDocumentId(createResponse);
+  if (!documentId) {
+    throw new Error("OpenSign did not return a document ID from createdocumentfromapp.");
+  }
+
+  const documentResponse = await fetchJson(`${apiBase}/functions/getDocument`, {
+    method: "POST",
+    headers: buildOpenSignHeaders(),
+    body: JSON.stringify({ docId: documentId }),
+  });
+
+  const embedUrl = extractOpenSignEmbedUrl(documentResponse, documentId);
+  if (!isSafeOpenSignUrl(embedUrl)) {
+    throw new Error(
+      "OpenSign created the document, but no signer-specific URL was found in the document payload. Check the template signer role and signer assignments.",
+    );
+  }
+
+  return {
+    sessionId: documentId,
+    documentId,
+    embedUrl,
+  };
+}
+
 function buildTemplateWidgetDefaults(reservation: {
   firstName: string;
   lastName: string;
@@ -337,6 +508,113 @@ function buildTemplateWidgetDefaults(reservation: {
     { name: "company", readonly: false, default: "Tonka Time Rentals customer" },
     { name: "job title", readonly: false, default: "Customer" },
   ];
+}
+
+function buildOpenSignDocumentSigners(
+  templateSigners: unknown[] | null,
+  reservation: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+  },
+  createdByUserId: string,
+) {
+  const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
+  const templateEntries = Array.isArray(templateSigners) ? templateSigners : [];
+  const matchingTemplateSigner = templateEntries.find((entry) => {
+    const role = firstString([
+      getNestedString(entry, ["Role"]),
+      getNestedString(entry, ["role"]),
+      getNestedString(entry, ["Name"]),
+      getNestedString(entry, ["name"]),
+    ]);
+
+    return role?.toLowerCase().includes("customer");
+  });
+
+  const baseEntry =
+    matchingTemplateSigner && typeof matchingTemplateSigner === "object" && !Array.isArray(matchingTemplateSigner)
+      ? { ...(matchingTemplateSigner as Record<string, unknown>) }
+      : {};
+
+  return [
+    {
+      ...baseEntry,
+      Name: signerName,
+      Email: reservation.email,
+      Phone: reservation.phone || undefined,
+      Role: firstString([
+        getNestedString(baseEntry, ["Role"]),
+        getNestedString(baseEntry, ["role"]),
+      ]) ?? "Customer",
+      UserId: {
+        __type: "Pointer",
+        className: "_User",
+        objectId: createdByUserId,
+      },
+    },
+  ];
+}
+
+function buildOpenSignDocumentPlaceholders(
+  templatePlaceholders: unknown[] | null,
+  reservation: {
+    publicId: string;
+    weekendStartDate: Date;
+    weekendEndDate: Date;
+    jobsiteStreet: string;
+    jobsiteCity: string;
+    jobsiteState: string;
+    jobsiteZip: string;
+    colorado811Ticket: string | null;
+    workDescription: string | null;
+    isPropertyOwner: boolean | null;
+    ownerPermission: boolean | null;
+    damageWaiverChoice: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+  },
+) {
+  const placeholderValues = new Map(
+    buildTemplatePrefill(reservation).map((entry) => [entry.name.toLowerCase(), entry.response]),
+  );
+  placeholderValues.set("name", `${reservation.firstName} ${reservation.lastName}`.trim());
+  placeholderValues.set("email", reservation.email);
+
+  const templateEntries = Array.isArray(templatePlaceholders) ? templatePlaceholders : [];
+  return templateEntries.map((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+      return entry;
+    }
+
+    const updated = { ...(entry as Record<string, unknown>) };
+    const key = firstString([
+      getNestedString(updated, ["Name"]),
+      getNestedString(updated, ["name"]),
+      getNestedString(updated, ["key"]),
+      getNestedString(updated, ["Key"]),
+    ]);
+
+    if (!key) {
+      return updated;
+    }
+
+    const normalized = key.toLowerCase();
+    const nextValue = placeholderValues.get(normalized);
+    if (nextValue == null) {
+      return updated;
+    }
+
+    updated.text = nextValue;
+    updated.Text = nextValue;
+    updated.value = nextValue;
+    updated.Value = nextValue;
+    updated.defaultValue = nextValue;
+    updated.DefaultValue = nextValue;
+    return updated;
+  });
 }
 
 function buildTemplatePrefill(reservation: {
@@ -375,6 +653,29 @@ function getOpenSignApiBase() {
   return env.OPENSIGN_API_URL!.replace(/\/+$/, "");
 }
 
+async function loginOpenSignAdmin() {
+  const apiBase = getOpenSignApiBase();
+  const loginUrl = new URL(`${apiBase}/login`);
+  loginUrl.searchParams.set("username", env.OPENSIGN_USERNAME!);
+  loginUrl.searchParams.set("password", env.OPENSIGN_PASSWORD!);
+
+  const response = await fetchJson(loginUrl.toString(), {
+    method: "GET",
+    headers: buildOpenSignHeaders(),
+  });
+
+  const sessionToken = firstString([
+    getNestedString(response, ["sessionToken"]),
+    getNestedString(response, ["result", "sessionToken"]),
+  ]);
+
+  if (!sessionToken) {
+    throw new Error("OpenSign login did not return a session token. Check OPENSIGN_USERNAME and OPENSIGN_PASSWORD.");
+  }
+
+  return sessionToken;
+}
+
 function buildOpenSignHeaders() {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -390,6 +691,24 @@ function buildOpenSignHeaders() {
   }
 
   return headers;
+}
+
+function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
+  const directCandidates = collectStringValues(payload).map((value: string) => absolutizeOpenSignUrl(value));
+  const rankedCandidate = directCandidates.find((value: string | null) => {
+    if (!value || !isSafeOpenSignUrl(value)) {
+      return false;
+    }
+
+    const lower = value.toLowerCase();
+    return lower.includes("recipientsignpdf") || lower.includes(`/load/`) || lower.includes(documentId.toLowerCase());
+  });
+
+  if (rankedCandidate) {
+    return rankedCandidate;
+  }
+
+  return directCandidates.find((value: string | null) => isSafeOpenSignUrl(value)) ?? null;
 }
 
 async function fetchJson(url: string, init: RequestInit) {
@@ -504,8 +823,42 @@ function getNestedArray(payload: unknown, path: string[]) {
   return Array.isArray(current) ? current : null;
 }
 
+function getNestedValue(payload: unknown, path: string[]) {
+  let current: unknown = payload;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return current;
+}
+
 function firstString(values: Array<string | null | undefined>) {
   return values.find((value) => typeof value === "string" && value.trim()) ?? null;
+}
+
+function collectStringValues(payload: unknown, seen = new Set<unknown>()): string[] {
+  if (payload == null || seen.has(payload)) {
+    return [] as string[];
+  }
+
+  if (typeof payload === "string") {
+    return [payload];
+  }
+
+  if (typeof payload !== "object") {
+    return [] as string[];
+  }
+
+  seen.add(payload);
+
+  if (Array.isArray(payload)) {
+    return payload.flatMap((value: unknown) => collectStringValues(value, seen));
+  }
+
+  return Object.values(payload).flatMap((value: unknown) => collectStringValues(value, seen));
 }
 
 function absolutizeOpenSignUrl(url: string | null) {
