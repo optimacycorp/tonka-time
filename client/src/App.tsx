@@ -33,6 +33,7 @@ type ReservationDraft = {
 
 type ReservationSummary = {
   publicId?: string;
+  email?: string;
   weekendStartDate?: string;
   weekendEndDate?: string;
   deliveryZone?: string;
@@ -1212,6 +1213,9 @@ function ReservationFlow() {
                     />
                   ) : checkoutMode === "fake" ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
+                      <p className="inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                        Fake Pay Enabled
+                      </p>
                       <h3 className="font-display text-2xl text-soil">Fake payment simulation complete</h3>
                       <p className="mt-3 text-slate-700">
                         Because `FAKE_PAY=TRUE` and this reservation used `fakepay@tonkatimerentals.com`, the system simulated a successful paid reservation without contacting Stripe.
@@ -1322,6 +1326,11 @@ function ReservationFlow() {
               </p>
               <div className="mt-6 rounded-[1.75rem] bg-sky p-6">
                 <p className="font-semibold text-slate-700">Reservation ID: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Pending"}</p>
+                {(reservationSummary?.email?.toLowerCase() === "fakepay@tonkatimerentals.com" || checkoutMode === "fake") && (
+                  <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                    Fake Pay Reservation
+                  </p>
+                )}
                 <p className="mt-2 text-sm text-slate-600">Weekend: {reservationSummary?.weekendStartDate?.slice(0, 10) ?? draft.weekendStartDate} to {reservationSummary?.weekendEndDate?.slice(0, 10) ?? derivedWeekendEnd}</p>
                 <p className="mt-2 text-sm text-slate-600">Delivery zone: {reservationSummary?.deliveryZone ?? draft.deliveryZone ?? "Pending"}</p>
                 <p className="mt-4 text-sm text-slate-600">You can create or sign in to an account later with the same email or phone number to see payment status, manage reservations, and cancel an order if needed.</p>
@@ -1750,6 +1759,11 @@ function AccountPage() {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <h3 className="font-display text-2xl text-soil">{order.publicId}</h3>
+                        {(order.email?.toLowerCase() === "fakepay@tonkatimerentals.com" || Boolean(order.internalFlags && typeof order.internalFlags === "object" && (order.internalFlags as Record<string, unknown>).fakePay)) && (
+                          <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                            Fake Pay Reservation
+                          </p>
+                        )}
                         <p className="mt-2 text-sm text-slate-700">Weekend: {order.weekendStartDate?.slice(0, 10)} to {order.weekendEndDate?.slice(0, 10)}</p>
                         <p className="mt-2 text-sm text-slate-700">Reservation status: {order.status ?? "Pending"}</p>
                         <p className="mt-2 text-sm text-slate-700">Payment status: {order.paymentStatus ?? "Not started"}</p>
@@ -1908,6 +1922,11 @@ function AdminPage() {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <h3 className="font-display text-2xl text-soil">{order.publicId}</h3>
+                        {isFakeReservation && (
+                          <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
+                            Fake Pay Reservation
+                          </p>
+                        )}
                         <p className="mt-2 text-sm text-slate-700">Customer: {order.user?.email ?? order.email ?? "No email"} / {order.user?.phone ?? order.phone ?? "No phone"}</p>
                         <p className="mt-2 text-sm text-slate-700">Weekend: {order.weekendStartDate?.slice(0, 10)} to {order.weekendEndDate?.slice(0, 10)}</p>
                         <p className="mt-2 text-sm text-slate-700">Reservation status: {order.status}</p>
