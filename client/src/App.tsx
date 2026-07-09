@@ -63,7 +63,7 @@ type CheckoutSessionStatusResponse = {
   reservationPublicId: string | null;
 };
 
-type SignNowSigningResponse = {
+type OpenSignSigningResponse = {
   mode: "live" | "placeholder";
   reservationPublicId?: string;
   sessionId?: string | null;
@@ -745,7 +745,7 @@ function ReservationFlow() {
 
     try {
       setSignNowLoading(true);
-      const currentStatus = await requestJson<SignNowSigningResponse>(`/api/signnow/signing-session-status?reservationPublicId=${encodeURIComponent(publicId)}`);
+      const currentStatus = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(publicId)}`);
 
       if (currentStatus.status === "COMPLETED" || currentStatus.signedDocumentUrl) {
         setSignNowMode(currentStatus.mode);
@@ -762,11 +762,11 @@ function ReservationFlow() {
       if (currentStatus.embedUrl) {
         setSignNowMode(currentStatus.mode);
         setSignNowEmbedUrl(currentStatus.embedUrl);
-        setSignNowMessage(currentStatus.message ?? "Continue with the embedded SignNow agreement below.");
+        setSignNowMessage(currentStatus.message ?? "Continue with the embedded OpenSign agreement below.");
         return;
       }
 
-      const created = await requestJson<SignNowSigningResponse>("/api/signnow/create-signing-session", {
+      const created = await requestJson<OpenSignSigningResponse>("/api/opensign/create-signing-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reservationPublicId: publicId }),
@@ -776,7 +776,7 @@ function ReservationFlow() {
       setSignNowEmbedUrl(created.embedUrl ?? "");
       setSignNowMessage(created.message ?? "");
     } catch (error) {
-      setSignNowMessage(error instanceof Error ? error.message : "Could not prepare the SignNow signing session.");
+      setSignNowMessage(error instanceof Error ? error.message : "Could not prepare the OpenSign signing session.");
     } finally {
       setSignNowLoading(false);
     }
@@ -1234,7 +1234,7 @@ function ReservationFlow() {
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 8</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Agreement signing</h2>
               <p className="mt-4 text-slate-700">
-                Review and sign the rental agreement without leaving the reservation flow. The signing step is now aligned to SignNow so the agreement workflow stays seamless inside the reservation experience.
+                Review and sign the rental agreement without leaving the reservation flow. The signing step is now aligned to self-hosted OpenSign so the agreement workflow stays on your RackNerd stack.
               </p>
               <div className="mt-6 grid gap-6 xl:grid-cols-[0.38fr_0.62fr]">
                 <div className="rounded-2xl bg-field p-5 text-white">
@@ -1242,7 +1242,7 @@ function ReservationFlow() {
                   <p className="mt-2">Reservation status: {reservationSummary?.status ?? "Draft / pending payment"}</p>
                   <p className="mt-2">Agreement status: {reservationSummary?.signingStatus ?? "Preparing signature request"}</p>
                   <div className="mt-4 rounded-2xl bg-white/10 px-4 py-4 text-sm text-white/85">
-                    {signNowMessage || (signNowLoading ? "Preparing your agreement..." : "Your agreement will appear here once SignNow is ready.")}
+                    {signNowMessage || (signNowLoading ? "Preparing your agreement..." : "Your agreement will appear here once OpenSign is ready.")}
                   </div>
                   {reservationSummary?.signedDocumentUrl && (
                     <a href={reservationSummary.signedDocumentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded-full bg-white px-5 py-3 font-semibold text-field">
@@ -1255,22 +1255,22 @@ function ReservationFlow() {
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
                       <h3 className="font-display text-2xl text-soil">Agreement completed</h3>
                       <p className="mt-3 text-slate-700">
-                        The agreement is already signed. SignNow should email a copy to the signer, and you can also open the saved document from the link here.
+                        The agreement is already signed. OpenSign should have recorded the completion, and you can also open the saved document from the link here.
                       </p>
                     </div>
                   ) : signNowMode === "live" && signNowEmbedUrl ? (
                     <div className="overflow-hidden rounded-[1.5rem] border border-black/5 bg-white shadow-card">
                       <iframe
-                        title="SignNow agreement signing"
+                        title="OpenSign agreement signing"
                         src={signNowEmbedUrl}
                         className="min-h-[860px] w-full"
                       />
                     </div>
                   ) : signNowMode === "placeholder" ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
-                      <h3 className="font-display text-2xl text-soil">SignNow placeholder mode</h3>
+                      <h3 className="font-display text-2xl text-soil">OpenSign placeholder mode</h3>
                       <p className="mt-3 text-slate-700">
-                        SignNow credentials or template settings are still missing, so the embedded signing panel cannot load yet. Once the live settings are added, this step will render the agreement automatically.
+                        OpenSign host or template settings are still missing, so the embedded signing panel cannot load yet. Once the OpenSign stack is live on RackNerd, this step will render the agreement automatically.
                       </p>
                     </div>
                   ) : (
@@ -1293,7 +1293,7 @@ function ReservationFlow() {
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 9</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Confirmation summary</h2>
               <p className="mt-4 text-slate-700">
-                Your reservation flow is now saved through review and wired into the backend APIs. Payment is embedded, and the signing step is now pointed at SignNow for the agreement handoff.
+                Your reservation flow is now saved through review and wired into the backend APIs. Payment is embedded, and the signing step is now pointed at OpenSign for the agreement handoff.
               </p>
               <div className="mt-6 rounded-[1.75rem] bg-sky p-6">
                 <p className="font-semibold text-slate-700">Reservation ID: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Pending"}</p>

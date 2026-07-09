@@ -72,6 +72,49 @@ This script:
 - optionally seeds default data
 - verifies Docker and Nginx status
 
+## Self-hosted OpenSign on RackNerd
+
+OpenSign can run on the same RackNerd server as a separate Docker stack. The official OpenSign repo publishes Docker images and a compose example for self-hosting, which we adapted here so it does not conflict with your main site Nginx listener and existing app stack.
+
+Recommended layout:
+
+- Main Tonka app stays at `https://tonkatimerentals.com`
+- OpenSign runs on a subdomain such as `https://sign.tonkatimerentals.com`
+- OpenSign client binds locally on `127.0.0.1:3100`
+- OpenSign server API binds locally on `127.0.0.1:8081`
+
+Suggested DNS:
+
+- `A sign.tonkatimerentals.com -> 107.172.159.109`
+
+Suggested server setup:
+
+```bash
+cd /home/deploy/apps/tonka-time
+cp deploy/opensign.env.example .env.opensign
+# edit .env.opensign with real values
+sudo docker compose -f deploy/opensign-compose.yml up -d
+sudo cp nginx/opensign.tonkatimerentals.conf /etc/nginx/sites-available/opensign.tonkatimerentals.conf
+sudo ln -s /etc/nginx/sites-available/opensign.tonkatimerentals.conf /etc/nginx/sites-enabled/opensign.tonkatimerentals.conf
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+Then set these app env vars in `.env.production`:
+
+- `OPENSIGN_PUBLIC_URL=https://sign.tonkatimerentals.com`
+- `OPENSIGN_API_URL=https://sign.tonkatimerentals.com/api/app`
+- `OPENSIGN_TENANT_ID=...`
+- `OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL=...`
+- `OPENSIGN_API_KEY=...` if you use API-key-based document creation
+- `OPENSIGN_WEBHOOK_SECRET=...` if you use webhook validation
+
+Current code status:
+
+- The Tonka app is now pointed at OpenSign endpoints and OpenSign-facing messaging.
+- The app stores OpenSign session metadata and can embed or link to the OpenSign host.
+- The final API-specific document creation flow still depends on your exact OpenSign tenant/template setup.
+
 ## Prisma fallback for a brand-new server
 
 If `npm run prisma:deploy` fails with `P3015` even though `migration.sql` exists in `/app/server/prisma/migrations`, use schema push for the initial bootstrap:
@@ -100,5 +143,5 @@ bash deploy/issue-certificates.sh
 
 - Run daily PostgreSQL backups.
 - Keep video uploads in object storage instead of the repo.
-- Add real Stripe, SignNow, and email secrets before launch.
+- Add real Stripe, OpenSign, and email secrets before launch.
 - Re-run `bash deploy/deploy-app.sh` after every production push.

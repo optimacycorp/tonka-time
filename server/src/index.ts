@@ -9,7 +9,7 @@ import adminRoutes from "./routes/admin.js";
 import authRoutes from "./routes/auth.js";
 import accountRoutes from "./routes/account.js";
 import stripeRoutes, { stripeWebhookHandler } from "./routes/stripe.js";
-import signNowRoutes from "./routes/signnow.js";
+import openSignRoutes from "./routes/opensign.js";
 
 const app = express();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +27,7 @@ app.use("/api/account", accountRoutes);
 app.use("/api", publicRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/stripe", stripeRoutes);
-app.use("/api/signnow", signNowRoutes);
+app.use("/api/opensign", openSignRoutes);
 
 app.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
   if (!req.path.startsWith("/api")) {

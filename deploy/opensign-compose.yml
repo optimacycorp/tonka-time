@@ -1,0 +1,36 @@
+services:
+  opensign-server:
+    image: opensign/opensignserver:main
+    restart: unless-stopped
+    env_file:
+      - .env.opensign
+    environment:
+      NODE_ENV: production
+      SERVER_URL: ${HOST_URL}/api/app
+      PUBLIC_URL: ${HOST_URL}
+    depends_on:
+      - opensign-mongo
+    volumes:
+      - opensign_files:/usr/src/app/files
+    ports:
+      - "127.0.0.1:8081:8080"
+
+  opensign-client:
+    image: opensign/opensign:main
+    restart: unless-stopped
+    env_file:
+      - .env.opensign
+    depends_on:
+      - opensign-server
+    ports:
+      - "127.0.0.1:3100:3000"
+
+  opensign-mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - opensign_mongo:/data/db
+
+volumes:
+  opensign_files:
+  opensign_mongo:

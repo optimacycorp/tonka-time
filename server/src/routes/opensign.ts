@@ -10,14 +10,8 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
 
 const createSigningSessionSchema = z.object({ reservationPublicId: z.string().min(1) });
 
-function signNowConfigured() {
-  return Boolean(
-    env.SIGNNOW_CLIENT_ID &&
-      env.SIGNNOW_CLIENT_SECRET &&
-      env.SIGNNOW_USERNAME &&
-      env.SIGNNOW_PASSWORD &&
-      env.SIGNNOW_TEMPLATE_ID_WEEKEND_RENTAL,
-  );
+function openSignConfigured() {
+  return Boolean(env.OPENSIGN_PUBLIC_URL && env.OPENSIGN_API_URL && env.OPENSIGN_TENANT_ID);
 }
 
 router.post("/create-signing-session", asyncRoute(async (req, res) => {
@@ -38,17 +32,18 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
   const existingFlags = getLegacySigningFlags(reservation.internalFlags);
   if (reservation.docusealSubmissionId && existingFlags.embedUrl) {
     return res.json({
-      mode: signNowConfigured() ? "live" : "placeholder",
+      mode: openSignConfigured() ? "live" : "placeholder",
       reservationPublicId: reservation.publicId,
       sessionId: reservation.docusealSubmissionId,
       embedUrl: existingFlags.embedUrl,
       status: reservation.docusealStatus,
       signedDocumentUrl: reservation.signedDocumentUrl ?? null,
-      message: signNowConfigured() ? "Existing SignNow signing session loaded." : "Existing SignNow placeholder session loaded.",
+      message: openSignConfigured() ? "Existing OpenSign signing session loaded." : "Existing OpenSign placeholder session loaded.",
     });
   }
 
-  const sessionId = reservation.docusealSubmissionId ?? `signnow_${reservation.publicId}`;
+  const sessionId = reservation.docusealSubmissionId ?? `opensign_${reservation.publicId}`;
+  const embedUrl = existingFlags.embedUrl ?? buildFallbackSigningUrl(reservation.publicId);
   const updated = await prisma.reservation.update({
     where: { publicId: reservation.publicId },
     data: {
@@ -57,27 +52,28 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
       status: reservation.status === "PAYMENT_RECEIVED" ? "AWAITING_SIGNATURE" : reservation.status,
       internalFlags: {
         ...getLegacyFlagsObject(reservation.internalFlags),
-        signnow: {
-          provider: "signnow",
-          embedUrl: null,
-          templateId: env.SIGNNOW_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
+        opensign: {
+          provider: "opensign",
+          embedUrl,
+          templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
           sessionId,
+          tenantId: env.OPENSIGN_TENANT_ID ?? null,
         },
       },
     },
   });
 
   return res.json({
-    mode: signNowConfigured() ? "live" : "placeholder",
+    mode: openSignConfigured() ? "live" : "placeholder",
     reservation: updated,
     reservationPublicId: reservation.publicId,
     sessionId,
-    embedUrl: null,
+    embedUrl,
     status: updated.docusealStatus,
     signedDocumentUrl: updated.signedDocumentUrl ?? null,
-    message: signNowConfigured()
-      ? "SignNow credentials are configured. The next step is wiring your exact SignNow template field mapping and invite flow."
-      : "SignNow credentials are still missing, so the signing step is using the SignNow placeholder mode.",
+    message: openSignConfigured()
+      ? "OpenSign is configured. The next step is wiring your exact OpenSign document template or API document-creation flow."
+      : "OpenSign is not fully configured yet, so the signing step is using placeholder mode.",
   });
 }));
 
@@ -94,12 +90,15 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
 
   const flags = getLegacySigningFlags(reservation.internalFlags);
   return res.json({
-    mode: signNowConfigured() ? "live" : "placeholder",
+    mode: openSignConfigured() ? "live" : "placeholder",
     reservationPublicId: reservation.publicId,
     sessionId: reservation.docusealSubmissionId ?? null,
-    embedUrl: flags.embedUrl ?? null,
+    embedUrl: flags.embedUrl ?? buildFallbackSigningUrl(reservation.publicId),
     status: reservation.docusealStatus,
     signedDocumentUrl: reservation.signedDocumentUrl ?? null,
+    message: openSignConfigured()
+      ? "OpenSign signing session is available."
+      : "OpenSign is not fully configured yet, so the signing step is using placeholder mode.",
   });
 }));
 
@@ -126,7 +125,7 @@ router.post("/webhook", asyncRoute(async (req, res) => {
   await prisma.webhookEvent.create({
     data: {
       provider: "DOCUSEAL",
-      providerEventId: payload?.id,
+      providerEventId: typeof payload?.id === "string" ? payload.id : null,
       reservationId: reservationPublicId,
       eventType,
       payload,
@@ -152,6 +151,16 @@ router.post("/webhook", asyncRoute(async (req, res) => {
   return res.json({ received: true });
 }));
 
+function buildFallbackSigningUrl(reservationPublicId: string) {
+  if (!env.OPENSIGN_PUBLIC_URL) {
+    return null;
+  }
+
+  const base = env.OPENSIGN_PUBLIC_URL.replace(/\/+$/, "");
+  const tenant = env.OPENSIGN_TENANT_ID ? `?tenant=${encodeURIComponent(env.OPENSIGN_TENANT_ID)}&reservation=${encodeURIComponent(reservationPublicId)}` : `?reservation=${encodeURIComponent(reservationPublicId)}`;
+  return `${base}${tenant}`;
+}
+
 function getLegacyFlagsObject(flags: unknown) {
   if (!flags || typeof flags !== "object" || Array.isArray(flags)) {
     return {};
@@ -162,9 +171,9 @@ function getLegacyFlagsObject(flags: unknown) {
 
 function getLegacySigningFlags(flags: unknown) {
   const objectFlags = getLegacyFlagsObject(flags);
-  const signNow = objectFlags.signnow;
-  if (signNow && typeof signNow === "object" && !Array.isArray(signNow)) {
-    return signNow as { embedUrl?: string | null };
+  const openSign = objectFlags.opensign;
+  if (openSign && typeof openSign === "object" && !Array.isArray(openSign)) {
+    return openSign as { embedUrl?: string | null };
   }
 
   return { embedUrl: null };
