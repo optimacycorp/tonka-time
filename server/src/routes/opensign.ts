@@ -417,7 +417,16 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     firstString([getNestedString(template, ["Name"]), getNestedString(template, ["name"])]) ??
     `Tonka Time Rental Agreement ${reservation.publicId}`;
 
-  const signers = buildOpenSignDocumentSigners(reservation, adminUserId);
+  const contractUserId = firstString([
+    getNestedString(template, ["ExtUserPtr", "objectId"]),
+    getNestedString(template, ["extUserPtr", "objectId"]),
+  ]);
+
+  if (!contractUserId) {
+    throw new Error("The OpenSign template is missing ExtUserPtr.objectId, so a document cannot be created from it.");
+  }
+
+  const signers = buildOpenSignDocumentSigners(reservation, contractUserId);
   const placeholders = buildOpenSignDocumentPlaceholders(
     getNestedArray(template, ["Placeholders"]),
     reservation,
@@ -430,8 +439,8 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     Description: `Tonka Time rental agreement for ${reservation.email}`,
     ExtUserPtr: {
       __type: "Pointer",
-      className: "_User",
-      objectId: adminUserId,
+      className: "contracts_Users",
+      objectId: contractUserId,
     },
     CreatedBy: {
       __type: "Pointer",
@@ -516,7 +525,7 @@ function buildOpenSignDocumentSigners(
     email: string;
     phone: string;
   },
-  createdByUserId: string,
+  contractUserId: string,
 ) {
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
   return [
@@ -527,8 +536,8 @@ function buildOpenSignDocumentSigners(
       Role: "Customer",
       UserId: {
         __type: "Pointer",
-        className: "_User",
-        objectId: createdByUserId,
+        className: "contracts_Users",
+        objectId: contractUserId,
       },
     },
   ];
