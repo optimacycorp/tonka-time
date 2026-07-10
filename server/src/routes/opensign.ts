@@ -453,7 +453,11 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     AutomaticReminders: true,
     NotifyOnSignatures: true,
     IsEnableOTP: false,
-    TemplateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
+    TemplateId: {
+      __type: "Pointer",
+      className: "contracts_Template",
+      objectId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
+    },
     Signers: signers,
     Placeholders: placeholders,
   };
