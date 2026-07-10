@@ -382,7 +382,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   const adminUser = await fetchJson(`${apiBase}/users/me`, {
     method: "GET",
     headers: {
-      ...buildOpenSignHeaders(),
+      ...buildOpenSignHeaders({ includeMasterKey: false }),
       "X-Parse-Session-Token": sessionToken,
     },
   });
@@ -460,7 +460,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   const createResponse = await fetchJson(`${apiBase}/functions/createdocumentfromapp`, {
     method: "POST",
     headers: {
-      ...buildOpenSignHeaders(),
+      ...buildOpenSignHeaders({ includeMasterKey: false }),
       "X-Parse-Session-Token": sessionToken,
     },
     body: JSON.stringify({ document: documentPayload }),
@@ -474,7 +474,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   const documentResponse = await fetchJson(`${apiBase}/functions/getDocument`, {
     method: "POST",
     headers: {
-      ...buildOpenSignHeaders(),
+      ...buildOpenSignHeaders({ includeMasterKey: false }),
       "X-Parse-Session-Token": sessionToken,
     },
     body: JSON.stringify({ docId: documentId }),
@@ -638,7 +638,7 @@ async function loginOpenSignAdmin() {
 
   const response = await fetchJson(loginUrl.toString(), {
     method: "GET",
-    headers: buildOpenSignHeaders(),
+    headers: buildOpenSignHeaders({ includeMasterKey: false }),
   });
 
   const sessionToken = firstString([
@@ -653,7 +653,7 @@ async function loginOpenSignAdmin() {
   return sessionToken;
 }
 
-function buildOpenSignHeaders() {
+function buildOpenSignHeaders(options?: { includeMasterKey?: boolean }) {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
   };
@@ -662,8 +662,11 @@ function buildOpenSignHeaders() {
     headers["x-api-token"] = env.OPENSIGN_API_KEY;
   }
 
-  if (env.OPENSIGN_MASTER_KEY) {
+  if (env.OPENSIGN_APP_ID) {
     headers["X-Parse-Application-Id"] = env.OPENSIGN_APP_ID;
+  }
+
+  if (options?.includeMasterKey !== false && env.OPENSIGN_MASTER_KEY) {
     headers["X-Parse-Master-Key"] = env.OPENSIGN_MASTER_KEY;
   }
 
