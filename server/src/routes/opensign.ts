@@ -417,11 +417,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     firstString([getNestedString(template, ["Name"]), getNestedString(template, ["name"])]) ??
     `Tonka Time Rental Agreement ${reservation.publicId}`;
 
-  const signers = buildOpenSignDocumentSigners(
-    getNestedArray(template, ["Signers"]),
-    reservation,
-    adminUserId,
-  );
+  const signers = buildOpenSignDocumentSigners(reservation, adminUserId);
   const placeholders = buildOpenSignDocumentPlaceholders(
     getNestedArray(template, ["Placeholders"]),
     reservation,
@@ -484,7 +480,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   const embedUrl = extractOpenSignEmbedUrl(documentResponse, documentId);
   if (!isSafeOpenSignUrl(embedUrl)) {
     throw new Error(
-      "OpenSign created the document, but no signer-specific URL was found in the document payload. Check the template signer role and signer assignments.",
+      "OpenSign created the document, but no signer-specific URL was found in the document payload. Check that the template widgets are assigned to the Customer role and that the document was created from the saved template.",
     );
   }
 
@@ -511,7 +507,6 @@ function buildTemplateWidgetDefaults(reservation: {
 }
 
 function buildOpenSignDocumentSigners(
-  templateSigners: unknown[] | null,
   reservation: {
     firstName: string;
     lastName: string;
@@ -521,33 +516,12 @@ function buildOpenSignDocumentSigners(
   createdByUserId: string,
 ) {
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
-  const templateEntries = Array.isArray(templateSigners) ? templateSigners : [];
-  const matchingTemplateSigner = templateEntries.find((entry) => {
-    const role = firstString([
-      getNestedString(entry, ["Role"]),
-      getNestedString(entry, ["role"]),
-      getNestedString(entry, ["Name"]),
-      getNestedString(entry, ["name"]),
-    ]);
-
-    return role?.toLowerCase().includes("customer");
-  });
-
-  const baseEntry =
-    matchingTemplateSigner && typeof matchingTemplateSigner === "object" && !Array.isArray(matchingTemplateSigner)
-      ? { ...(matchingTemplateSigner as Record<string, unknown>) }
-      : {};
-
   return [
     {
-      ...baseEntry,
       Name: signerName,
       Email: reservation.email,
       Phone: reservation.phone || undefined,
-      Role: firstString([
-        getNestedString(baseEntry, ["Role"]),
-        getNestedString(baseEntry, ["role"]),
-      ]) ?? "Customer",
+      Role: "Customer",
       UserId: {
         __type: "Pointer",
         className: "_User",
