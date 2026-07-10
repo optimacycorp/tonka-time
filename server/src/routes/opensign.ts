@@ -703,6 +703,10 @@ async function fetchJson(url: string, init: RequestInit) {
   }
 
   if (!response.ok) {
+    const code =
+      typeof data === "object" && data !== null && "code" in data && typeof (data as { code?: unknown }).code === "number"
+        ? (data as { code: number }).code
+        : null;
     const detail =
       typeof data === "string"
         ? data
@@ -711,7 +715,19 @@ async function fetchJson(url: string, init: RequestInit) {
           : typeof data === "object" && data !== null && "error" in data && typeof (data as { error?: unknown }).error === "string"
             ? (data as { error: string }).error
             : `OpenSign request failed with HTTP ${response.status}.`;
-    throw new Error(detail);
+    const endpoint = (() => {
+      try {
+        return new URL(url).pathname;
+      } catch {
+        return url;
+      }
+    })();
+
+    throw new Error(
+      `OpenSign ${init.method ?? "GET"} ${endpoint} failed with HTTP ${response.status}${
+        code != null ? ` (code ${code})` : ""
+      }: ${detail}`,
+    );
   }
 
   return data;
