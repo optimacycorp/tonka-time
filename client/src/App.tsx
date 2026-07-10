@@ -1543,7 +1543,12 @@ function isSafeEmbeddedSigningUrl(url: string | null | undefined) {
   try {
     const parsed = new URL(url, window.location.origin);
     const normalizedPath = parsed.pathname.replace(/\/+$/, "");
-    return normalizedPath.length > 0 && normalizedPath !== "/";
+    const lowerPath = normalizedPath.toLowerCase();
+    return (
+      normalizedPath.length > 0 &&
+      normalizedPath !== "/" &&
+      (lowerPath.includes("/recipientsignpdf/") || lowerPath.includes("/load/recipientsignpdf/"))
+    );
   } catch {
     return false;
   }

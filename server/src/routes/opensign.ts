@@ -694,14 +694,14 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
     }
 
     const lower = value.toLowerCase();
-    return lower.includes("recipientsignpdf") || lower.includes(`/load/`) || lower.includes(documentId.toLowerCase());
+    return lower.includes("recipientsignpdf") || lower.includes("/load/recipientsignpdf/");
   });
 
   if (rankedCandidate) {
     return rankedCandidate;
   }
 
-  return directCandidates.find((value: string | null) => isSafeOpenSignUrl(value)) ?? null;
+  return null;
 }
 
 async function fetchJson(url: string, init: RequestInit) {
