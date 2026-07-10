@@ -142,6 +142,7 @@ const faqs = [
   ["How does the weekend rental work?", "We deliver Friday, provide a quick orientation, and pick up Monday."],
   ["Do I need an 811 ticket before digging?", "Yes. Colorado 811 and private utility verification are part of the rental checklist."],
   ["Can I use the excavator on steep slopes?", "No. The MVP site explicitly warns against steep slopes, unstable ground, or public ROW work without permits."],
+  ["Can I move the excavator to another property or haul it on my own trailer?", "No. The machine is approved only for the listed jobsite, geofence monitoring may be used, and customer transport or relocation requires prior written approval from Tonka Time Rentals."],
 ];
 
 const reservationSteps = [
@@ -169,6 +170,13 @@ const requiredChecklistKeys = [
   "willNotUndermineStructures",
   "willKeepPeoplePetsAway",
   "willStopIfUnsafe",
+  "understandsEquipmentMayBeTracked",
+  "consentsToLocationMonitoring",
+  "willUseOnlyAtApprovedJobsite",
+  "willNotMoveWithoutApproval",
+  "willNotTransportWithoutApproval",
+  "willNotTamperWithTrackingDevice",
+  "understandsGeofenceBreachConsequences",
 ];
 
 const tutorialKeys = [
@@ -256,6 +264,7 @@ function Shell({ children }: { children: React.ReactNode }) {
       <footer className="border-t border-black/5 bg-white">
         <div className="mx-auto max-w-6xl px-6 py-10 text-sm text-slate-600">
           Tonka Time Rentals provides equipment rental and basic orientation only. Customers remain responsible for boundaries, permits, locates, private utilities, site conditions, and safe operation.
+          Equipment use is limited to the approved jobsite unless Tonka Time Rentals gives prior written approval for relocation or customer transport.
         </div>
       </footer>
     </div>
@@ -288,7 +297,7 @@ function HomePage() {
                 </NavLink>
               </div>
               <div className="mt-10 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
-                {["Local delivery included in planning", "Quick tutorial before you dig", "Hydraulic thumb and expandable tracks", "811 reminders and homeowner checklist"].map((item) => (
+                {["Local delivery included in planning", "Quick tutorial before you dig", "Hydraulic thumb and expandable tracks", "811 reminders, approved-jobsite use, and geofence notice"].map((item) => (
                   <div key={item} className="rounded-2xl bg-white/70 px-4 py-3 shadow-card">
                     {item}
                   </div>
@@ -319,7 +328,7 @@ function HomePage() {
           <div className="grid gap-6 md:grid-cols-3">
             {[
               ["1. Pick your weekend", "Friday-to-Monday reservations only, with availability checks and soft holds."],
-              ["2. Confirm delivery", "Tell us about the address, access, work area, and property permissions."],
+              ["2. Confirm delivery", "Tell us about the address, access, work area, property permissions, and the one approved jobsite for the rental."],
               ["3. Pay and sign", "Checkout, agreement completion, and safety reminders all live in one flow."],
             ].map(([title, body]) => (
               <article key={title} className="rounded-[1.75rem] bg-white p-6 shadow-card">
@@ -410,7 +419,7 @@ function ServiceAreaPage() {
       <div className="mt-8 rounded-[1.75rem] bg-field p-6 text-white">
         <h2 className="font-display text-2xl">Before delivery</h2>
         <p className="mt-3 max-w-3xl text-white/80">
-          We use address details, access notes, and delivery-zone rules to decide whether your job is in the core area, extended area, or needs manual review before confirmation.
+          We use address details, access notes, and delivery-zone rules to decide whether your job is in the core area, extended area, or needs manual review before confirmation. The approved jobsite address also becomes the location limit for the rental unless Tonka Time Rentals approves a different use in writing.
         </p>
       </div>
     </SimplePage>
@@ -442,6 +451,9 @@ function SafetyChecklistPage() {
             <li>Know your boundaries and permissions</li>
             <li>Submit Colorado 811 and verify private utilities</li>
             <li>Check HOA, permit, easement, and setback rules</li>
+            <li>Use the machine only at the approved jobsite unless Tonka Time Rentals approves relocation in writing</li>
+            <li>Do not load, haul, or tow the excavator on your own trailer without written approval</li>
+            <li>Do not remove, block, or tamper with any tracker, lock, key, or security device</li>
             <li>Keep kids, pets, and bystanders away</li>
             <li>Stop if the machine leaks, overheats, or feels unsafe</li>
           </ul>
@@ -450,6 +462,9 @@ function SafetyChecklistPage() {
           <h2 className="font-display text-2xl">811 reminder</h2>
           <p className="mt-4 text-white/90">
             Public utility markings may not include irrigation, septic, propane, private electric, or yard systems. Confirm both public and private utilities before digging.
+          </p>
+          <p className="mt-4 text-white/90">
+            Tonka Time Rentals may use GPS, telematics, geofence, or anti-theft tools for delivery, recovery, theft prevention, support, and agreement enforcement during the rental period.
           </p>
         </div>
       </div>
@@ -1038,6 +1053,9 @@ function ReservationFlow() {
             <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 3</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Delivery and jobsite details</h2>
+              <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-4 text-sm text-amber-950">
+                The excavator is approved only for the jobsite address entered below. Customer transport, relocation to another property, or hauling on your own trailer is prohibited unless Tonka Time Rentals gives prior written approval.
+              </p>
               <div className="mt-6 grid gap-5 md:grid-cols-2">
                 {[
                   ["First name", "firstName"],
@@ -1086,7 +1104,7 @@ function ReservationFlow() {
             <div className="space-y-6">
               <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
                 <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 4</p>
-                <h2 className="mt-2 font-display text-3xl text-soil">Homeowner dig checklist</h2>
+                <h2 className="mt-2 font-display text-3xl text-soil">Homeowner dig and location-control checklist</h2>
                 <div className="mt-5 grid gap-3">
                   {requiredChecklistKeys.map((key) => (
                     <label key={key} className="flex items-start gap-3 rounded-2xl bg-sky px-4 py-4">
@@ -1139,6 +1157,9 @@ function ReservationFlow() {
               <h2 className="mt-2 font-display text-3xl text-soil">Limited Damage Waiver</h2>
               <p className="mt-4 text-slate-700">
                 Limited Damage Waiver: This is not insurance. It may reduce certain accidental equipment damage charges, subject to the signed agreement, exclusions, prohibited-use rules, and deductible terms.
+              </p>
+              <p className="mt-4 rounded-2xl bg-sky px-4 py-4 text-sm text-slate-700">
+                Unauthorized movement, unapproved transport, geofence breach, or tracker tampering are prohibited-use events and may lead to recovery charges, deposit retention, and additional claims under the signed agreement.
               </p>
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 <button
@@ -1410,6 +1431,13 @@ function checklistLabel(key: string) {
     willNotUndermineStructures: "I will not undermine structures, slabs, or retaining areas without a plan.",
     willKeepPeoplePetsAway: "I will keep children, pets, vehicles, and bystanders away.",
     willStopIfUnsafe: "I will stop and call Tonka Time Rentals if the machine leaks, overheats, throws a track, or seems unsafe.",
+    understandsEquipmentMayBeTracked: "I understand the excavator may contain GPS, geofence, telematics, or anti-theft tracking technology.",
+    consentsToLocationMonitoring: "I consent to Tonka Time Rentals monitoring equipment location during the rental period and until the machine is returned or recovered.",
+    willUseOnlyAtApprovedJobsite: "I understand the excavator may be used only at the approved jobsite address.",
+    willNotMoveWithoutApproval: "I will not move the excavator to another property or jobsite without prior written approval.",
+    willNotTransportWithoutApproval: "I will not load, haul, tow, or transport the excavator on my own trailer, truck, rollback, or other vehicle without prior written approval.",
+    willNotTamperWithTrackingDevice: "I will not remove, disable, cover, block, or tamper with any GPS, tracker, lock, key, or security device.",
+    understandsGeofenceBreachConsequences: "I understand that unauthorized movement, geofence breach, tracker tampering, or unapproved transport may result in rental termination, recovery fees, deposit retention, and additional claims.",
   };
   return labels[key] ?? key;
 }
