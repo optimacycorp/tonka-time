@@ -473,7 +473,10 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
 
   const documentResponse = await fetchJson(`${apiBase}/functions/getDocument`, {
     method: "POST",
-    headers: buildOpenSignHeaders(),
+    headers: {
+      ...buildOpenSignHeaders(),
+      "X-Parse-Session-Token": sessionToken,
+    },
     body: JSON.stringify({ docId: documentId }),
   });
 
