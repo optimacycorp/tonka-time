@@ -69,12 +69,13 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
   }
 
   const existingFlags = getLegacySigningFlags(reservation.internalFlags);
-  if (reservation.docusealSubmissionId && isSafeOpenSignUrl(existingFlags.embedUrl)) {
+  const existingEmbedUrl = normalizeOpenSignSignerUrl(existingFlags.embedUrl, reservation.docusealSubmissionId ?? undefined);
+  if (reservation.docusealSubmissionId && isSafeOpenSignUrl(existingEmbedUrl)) {
     return res.json({
       mode: openSignConfigured() ? "live" : "placeholder",
       reservationPublicId: reservation.publicId,
       sessionId: reservation.docusealSubmissionId,
-      embedUrl: existingFlags.embedUrl,
+      embedUrl: existingEmbedUrl,
       status: reservation.docusealStatus,
       signedDocumentUrl: reservation.signedDocumentUrl ?? null,
       message: openSignConfigured()
@@ -189,6 +190,7 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
   }
 
   const flags = getLegacySigningFlags(reservation.internalFlags);
+  const embedUrl = normalizeOpenSignSignerUrl(flags.embedUrl, reservation.docusealSubmissionId ?? undefined);
 
   if (reservation.docusealStatus === "COMPLETED" || reservation.signedDocumentUrl) {
     return res.json({
@@ -202,12 +204,12 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
     });
   }
 
-  if (isSafeOpenSignUrl(flags.embedUrl)) {
+  if (isSafeOpenSignUrl(embedUrl)) {
     return res.json({
       mode: openSignConfigured() ? "live" : "placeholder",
       reservationPublicId: reservation.publicId,
       sessionId: reservation.docusealSubmissionId ?? null,
-      embedUrl: flags.embedUrl,
+      embedUrl,
       status: reservation.docusealStatus,
       signedDocumentUrl: reservation.signedDocumentUrl ?? null,
       message: "OpenSign signing session is available.",
@@ -730,7 +732,7 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
   });
 
   if (rankedCandidate) {
-    return rankedCandidate;
+    return normalizeOpenSignSignerUrl(rankedCandidate, documentId);
   }
 
   return null;
@@ -1012,6 +1014,28 @@ function absolutizeOpenSignUrl(url: string | null) {
     return new URL(url, env.OPENSIGN_PUBLIC_URL).toString();
   } catch {
     return null;
+  }
+}
+
+function normalizeOpenSignSignerUrl(url: string | null | undefined, documentId?: string) {
+  const absolute = absolutizeOpenSignUrl(url ?? null);
+  if (!absolute) {
+    return null;
+  }
+
+  try {
+    const parsed = new URL(absolute);
+    const pathSegments = parsed.pathname.split("/").filter(Boolean);
+    const singleSegment = pathSegments.length === 1 ? pathSegments[0] : null;
+
+    if (singleSegment && (!documentId || singleSegment.toLowerCase() === documentId.toLowerCase())) {
+      parsed.pathname = `/load/recipientsignpdf/${singleSegment}`;
+      return parsed.toString();
+    }
+
+    return parsed.toString();
+  } catch {
+    return absolute;
   }
 }
 

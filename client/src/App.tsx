@@ -1550,10 +1550,7 @@ function isSafeEmbeddedSigningUrl(url: string | null | undefined) {
       normalizedPath !== "/" &&
       (
         lowerPath.includes("/recipientsignpdf/") ||
-        lowerPath.includes("/load/recipientsignpdf/") ||
-        // Newer OpenSign builds can return a direct signer session path like /sgAx176Vvr.
-        (pathSegments.length === 1 &&
-          !["login", "register", "forgotpassword", "dashboard", "templates", "documents", "settings", "users"].includes(lowerPath.replace(/^\//, "")))
+        lowerPath.includes("/load/recipientsignpdf/")
       )
     );
   } catch {
