@@ -1,4 +1,5 @@
 import { Router, type RequestHandler } from "express";
+import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { env } from "../lib/config.js";
 import { prisma } from "../lib/prisma.js";
@@ -19,7 +20,7 @@ type OpenSignFlags = {
   sessionId?: string | null;
   tenantId?: string | null;
   createdAt?: string | null;
-  debug?: Record<string, unknown> | null;
+  debug?: Prisma.InputJsonValue | null;
 };
 
 function openSignConfigured() {
@@ -41,7 +42,15 @@ function extractOpenSignDebug(error: unknown) {
   }
 
   const debug = (error as { openSignDebug?: unknown }).openSignDebug;
-  return debug && typeof debug === "object" && !Array.isArray(debug) ? (debug as Record<string, unknown>) : null;
+  return toPrismaJson(debug);
+}
+
+function toPrismaJson(value: unknown): Prisma.InputJsonValue | null {
+  if (value == null) {
+    return null;
+  }
+
+  return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
 
 router.post("/create-signing-session", asyncRoute(async (req, res) => {
