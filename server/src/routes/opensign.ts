@@ -386,7 +386,7 @@ async function createLiveSigningSessionViaLegacyApi(reservation: {
   if (!isSafeOpenSignUrl(embedUrl)) {
     throw new Error("OpenSign did not return a signer document link. The template may be missing signers, or the signer role may not match `Customer`.");
   }
-  const safeEmbedUrl = embedUrl;
+  const safeEmbedUrl = embedUrl as string;
 
   return {
     sessionId: documentId,
@@ -558,7 +558,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     (debugError as Error & { openSignDebug?: Record<string, unknown> }).openSignDebug = documentDebug;
     throw debugError;
   }
-  const safeEmbedUrl = embedUrl;
+  const safeEmbedUrl = embedUrl as string;
 
   return {
     sessionId: documentId,
