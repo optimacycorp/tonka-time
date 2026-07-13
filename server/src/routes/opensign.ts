@@ -776,6 +776,21 @@ function inspectOpenSignDocumentResponse(payload: unknown, documentId: string) {
     .filter((entry) => entry != null)
     .slice(0, 10);
 
+  const placeholderCollections = [
+    getNestedArray(payload, ["Placeholders"]),
+    getNestedArray(payload, ["placeholders"]),
+    getNestedArray(payload, ["result", "Placeholders"]),
+    getNestedArray(payload, ["result", "placeholders"]),
+    getNestedArray(payload, ["data", "Placeholders"]),
+    getNestedArray(payload, ["data", "placeholders"]),
+  ].filter((entry): entry is unknown[] => Array.isArray(entry));
+
+  const placeholderBindingSummary = placeholderCollections
+    .flatMap((collection) => collection)
+    .map((entry) => summarizeOpenSignPlaceholderBinding(entry))
+    .filter((entry) => entry != null)
+    .slice(0, 20);
+
   const topLevelKeys = payload && typeof payload === "object" && !Array.isArray(payload)
     ? Object.keys(payload as Record<string, unknown>).slice(0, 40)
     : [];
@@ -784,6 +799,7 @@ function inspectOpenSignDocumentResponse(payload: unknown, documentId: string) {
     embedUrl,
     candidateUrls,
     signerSummaries,
+    placeholderBindingSummary,
     topLevelKeys,
     documentId,
   };
@@ -817,6 +833,69 @@ function summarizeOpenSignSigner(entry: unknown) {
       absolutizeOpenSignUrl(getNestedString(entry, ["signingUrl"])),
       absolutizeOpenSignUrl(getNestedString(entry, ["link"])),
     ]),
+  };
+}
+
+function summarizeOpenSignPlaceholderBinding(entry: unknown) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+
+  const placeholderItems =
+    getNestedArray(entry, ["placeHolder"]) ??
+    getNestedArray(entry, ["placeholder"]) ??
+    [];
+
+  const firstField =
+    Array.isArray(placeholderItems) && placeholderItems.length > 0 && placeholderItems[0] && typeof placeholderItems[0] === "object"
+      ? placeholderItems[0]
+      : null;
+
+  const firstPos =
+    firstField && !Array.isArray(firstField)
+      ? getNestedArray(firstField, ["pos"])?.[0] ?? null
+      : null;
+
+  return {
+    role: firstString([
+      getNestedString(entry, ["Role"]),
+      getNestedString(entry, ["role"]),
+    ]),
+    signerObjId: firstString([
+      getNestedString(entry, ["signerObjId"]),
+      getNestedString(entry, ["SignerObjId"]),
+    ]),
+    signerPtrObjectId: firstString([
+      getNestedString(entry, ["signerPtr", "objectId"]),
+      getNestedString(entry, ["SignerPtr", "objectId"]),
+    ]),
+    placeholderId: firstString([
+      getNestedString(entry, ["Id"]),
+      getNestedString(entry, ["id"]),
+    ]),
+    fieldType:
+      firstPos && typeof firstPos === "object" && !Array.isArray(firstPos)
+        ? firstString([
+            getNestedString(firstPos, ["type"]),
+            getNestedString(firstPos, ["Type"]),
+          ])
+        : null,
+    fieldName:
+      firstPos && typeof firstPos === "object" && !Array.isArray(firstPos)
+        ? firstString([
+            getNestedString(firstPos, ["options", "name"]),
+            getNestedString(firstPos, ["Options", "name"]),
+            getNestedString(firstPos, ["Options", "Name"]),
+          ])
+        : null,
+    fieldCount: Array.isArray(placeholderItems)
+      ? placeholderItems.reduce((count, item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) {
+            return count;
+          }
+          return count + (getNestedArray(item, ["pos"])?.length ?? 0);
+        }, 0)
+      : 0,
   };
 }
 
