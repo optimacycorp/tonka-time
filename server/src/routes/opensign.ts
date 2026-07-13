@@ -631,10 +631,18 @@ async function findOrCreateOpenSignContact(options: {
     },
   );
 
-  const existingId = firstString([
-    getNestedString(existing, ["results", 0, "objectId"]),
-    getNestedString(existing, ["result", 0, "objectId"]),
-  ]);
+  const existingResults =
+    getNestedArray(existing, ["results"]) ??
+    getNestedArray(existing, ["result"]) ??
+    [];
+
+  const existingId =
+    Array.isArray(existingResults) && existingResults.length > 0
+      ? firstString([
+          getNestedString(existingResults[0], ["objectId"]),
+          getNestedString(existingResults[0], ["id"]),
+        ])
+      : null;
 
   if (existingId) {
     return existingId;
