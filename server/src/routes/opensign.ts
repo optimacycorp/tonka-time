@@ -134,6 +134,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
             sessionId: created.sessionId,
             tenantId: env.OPENSIGN_TENANT_ID ?? null,
             createdAt: new Date().toISOString(),
+            debug: created.debug ?? null,
           },
         },
       },
@@ -517,16 +518,17 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   });
 
   const documentDebug = inspectOpenSignDocumentResponse(documentResponse, documentId);
+  let signingLinksDebug: unknown = null;
   let embedUrl: string | null = null;
   try {
-    const signingLinkResponse = await fetchJson(`${apiBase}/signinglinks/${encodeURIComponent(documentId)}`, {
+    signingLinksDebug = await fetchJson(`${apiBase}/signinglinks/${encodeURIComponent(documentId)}`, {
       method: "GET",
       headers: {
         ...buildOpenSignHeaders({ includeMasterKey: false }),
         "X-Parse-Session-Token": sessionToken,
       },
     });
-    embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinkResponse));
+    embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug));
   } catch (fallbackError) {
     console.error("OpenSign signinglinks lookup failed", fallbackError);
   }
@@ -548,6 +550,12 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     sessionId: documentId,
     documentId,
     embedUrl,
+    debug: toPrismaJson({
+      selectedEmbedUrl: embedUrl,
+      selectedSource: isSafeOpenSignUrl(absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug))) ? "signinglinks" : "getDocument",
+      documentDebug,
+      signingLinksDebug: toPrismaJson(signingLinksDebug),
+    }),
   };
 }
 
