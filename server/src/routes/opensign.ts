@@ -463,9 +463,23 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     throw new Error("The OpenSign template is missing ExtUserPtr.objectId, so a document cannot be created from it.");
   }
 
-  const signers = buildOpenSignDocumentSigners(reservation);
+  const tenantId = firstString([
+    getNestedString(adminUser, ["TenantId", "objectId"]),
+    getNestedString(adminUser, ["result", "TenantId", "objectId"]),
+  ]);
+
+  const contactId = await findOrCreateOpenSignContact({
+    apiBase,
+    sessionToken,
+    adminUserId,
+    tenantId,
+    reservation,
+  });
+
+  const signers = buildOpenSignDocumentSigners(contactId);
   const placeholders = buildOpenSignDocumentPlaceholders(
     getNestedArray(template, ["Placeholders"]),
+    contactId,
     reservation,
   );
 
@@ -484,11 +498,13 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
       className: "_User",
       objectId: adminUserId,
     },
-    SentToOthers: true,
+    SignedUrl: templateUrl,
+    SentToOthers: false,
     SendinOrder: true,
     AllowModifications: false,
     AutomaticReminders: true,
     NotifyOnSignatures: true,
+    DocSentAt: { __type: "Date", iso: new Date().toISOString() },
     IsEnableOTP: false,
     TemplateId: {
       __type: "Pointer",
@@ -588,27 +604,97 @@ function buildTemplateWidgetDefaults(reservation: {
   ];
 }
 
-function buildOpenSignDocumentSigners(
+async function findOrCreateOpenSignContact(options: {
+  apiBase: string;
+  sessionToken: string;
+  adminUserId: string;
+  tenantId: string | null;
   reservation: {
     firstName: string;
     lastName: string;
     email: string;
     phone: string;
-  },
-) {
-  const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
+  };
+}) {
+  const { apiBase, sessionToken, adminUserId, tenantId, reservation } = options;
+  const existing = await fetchJson(
+    `${apiBase}/classes/contracts_Contactbook?where=${encodeURIComponent(JSON.stringify({
+      Email: reservation.email,
+      IsDeleted: { $ne: true },
+    }))}&limit=1`,
+    {
+      method: "GET",
+      headers: {
+        ...buildOpenSignHeaders({ includeMasterKey: false }),
+        "X-Parse-Session-Token": sessionToken,
+      },
+    },
+  );
+
+  const existingId = firstString([
+    getNestedString(existing, ["results", 0, "objectId"]),
+    getNestedString(existing, ["result", 0, "objectId"]),
+  ]);
+
+  if (existingId) {
+    return existingId;
+  }
+
+  const payload: Record<string, unknown> = {
+    Name: `${reservation.firstName} ${reservation.lastName}`.trim(),
+    Email: reservation.email,
+    Phone: reservation.phone || undefined,
+    UserRole: "contracts_Guest",
+    IsDeleted: false,
+    CreatedBy: {
+      __type: "Pointer",
+      className: "_User",
+      objectId: adminUserId,
+    },
+  };
+
+  if (tenantId) {
+    payload.TenantId = {
+      __type: "Pointer",
+      className: "partners_Tenant",
+      objectId: tenantId,
+    };
+  }
+
+  const created = await fetchJson(`${apiBase}/classes/contracts_Contactbook`, {
+    method: "POST",
+    headers: {
+      ...buildOpenSignHeaders({ includeMasterKey: false }),
+      "X-Parse-Session-Token": sessionToken,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const createdId = firstString([
+    getNestedString(created, ["objectId"]),
+    getNestedString(created, ["result", "objectId"]),
+  ]);
+
+  if (!createdId) {
+    throw new Error("OpenSign did not return a contact ID for the signer.");
+  }
+
+  return createdId;
+}
+
+function buildOpenSignDocumentSigners(contactId: string) {
   return [
     {
-      Name: signerName,
-      Email: reservation.email,
-      Phone: reservation.phone || undefined,
-      Role: "Customer",
+      __type: "Pointer",
+      className: "contracts_Contactbook",
+      objectId: contactId,
     },
   ];
 }
 
 function buildOpenSignDocumentPlaceholders(
   templatePlaceholders: unknown[] | null,
+  contactId: string,
   reservation: {
     publicId: string;
     weekendStartDate: Date;
@@ -640,6 +726,12 @@ function buildOpenSignDocumentPlaceholders(
     }
 
     const updated = { ...(entry as Record<string, unknown>) };
+    updated.signerPtr = {
+      __type: "Pointer",
+      className: "contracts_Contactbook",
+      objectId: contactId,
+    };
+    updated.signerObjId = contactId;
     const key = firstString([
       getNestedString(updated, ["Name"]),
       getNestedString(updated, ["name"]),
