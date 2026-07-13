@@ -104,11 +104,18 @@ Then set these app env vars in `.env.production`:
 
 - `OPENSIGN_PUBLIC_URL=https://sign.tonkatimerentals.com`
 - `OPENSIGN_API_URL=https://sign.tonkatimerentals.com/api/app`
+- `OPENSIGN_INTERNAL_API_URL=http://127.0.0.1:8081/app`
 - `OPENSIGN_TENANT_ID=...`
 - `OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL=...`
 - `OPENSIGN_API_KEY=...` if you use API-key-based document creation
 - `OPENSIGN_USERNAME=...` and `OPENSIGN_PASSWORD=...` for an OpenSign admin account when using the self-hosted Parse cloud-function flow
 - `OPENSIGN_WEBHOOK_SECRET=...` if you use webhook validation
+
+Why the internal URL matters:
+
+- The customer-facing embed link should stay on `https://sign.tonkatimerentals.com`
+- The Tonka backend is more reliable when it calls the local OpenSign container directly at `http://127.0.0.1:8081/app`
+- This avoids Cloudflare/Nginx hairpin issues and prevents the rental-agreement step from surfacing a generic host-level `502 Bad gateway` page when OpenSign is slow or unreachable through the public hostname
 
 Important nginx note:
 

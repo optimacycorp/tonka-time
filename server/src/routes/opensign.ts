@@ -640,7 +640,7 @@ function buildTemplatePrefill(reservation: {
 }
 
 function getOpenSignApiBase() {
-  return env.OPENSIGN_API_URL!.replace(/\/+$/, "");
+  return (env.OPENSIGN_INTERNAL_API_URL || env.OPENSIGN_API_URL)!.replace(/\/+$/, "");
 }
 
 async function loginOpenSignAdmin() {
@@ -705,8 +705,38 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
 }
 
 async function fetchJson(url: string, init: RequestInit) {
-  const response = await fetch(url, init);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), env.OPENSIGN_REQUEST_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    clearTimeout(timeout);
+
+    if (error instanceof Error && error.name === "AbortError") {
+      const endpoint = (() => {
+        try {
+          return new URL(url).pathname;
+        } catch {
+          return url;
+        }
+      })();
+
+      throw new Error(
+        `OpenSign ${init.method ?? "GET"} ${endpoint} timed out after ${env.OPENSIGN_REQUEST_TIMEOUT_MS}ms. ` +
+        `If OpenSign is on the same RackNerd server, point OPENSIGN_INTERNAL_API_URL at the local service (for example http://127.0.0.1:8081/app).`,
+      );
+    }
+
+    throw error;
+  }
+
   const text = await response.text();
+  clearTimeout(timeout);
   let data: unknown = null;
 
   try {

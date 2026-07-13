@@ -41,6 +41,7 @@ Rotate this password immediately in production after the first deploy.
 - Reservation cancellation updates the reservation status, releases the calendar slot, marks refund state, and logs customer/admin notifications.
 - Self-hosted OpenSign can authenticate either with `OPENSIGN_API_KEY` or, when the hosted UI does not expose API tokens, with `OPENSIGN_MASTER_KEY` plus `OPENSIGN_APP_ID`.
 - The current self-hosted create-session flow works best with `OPENSIGN_USERNAME` and `OPENSIGN_PASSWORD` for an OpenSign admin account so the Tonka API can log in, clone the template, and fetch the signer-specific document URL through Parse cloud functions.
+- On single-server deployments such as RackNerd, set `OPENSIGN_INTERNAL_API_URL=http://127.0.0.1:8081/app` so the Tonka API talks to OpenSign directly instead of calling the public `sign.` hostname from the same box.
 
 ## Deployment
 
