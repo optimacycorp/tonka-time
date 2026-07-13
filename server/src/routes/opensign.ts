@@ -517,7 +517,22 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   });
 
   const documentDebug = inspectOpenSignDocumentResponse(documentResponse, documentId);
-  const embedUrl = documentDebug.embedUrl;
+  let embedUrl = documentDebug.embedUrl;
+  if (!isSafeOpenSignUrl(embedUrl)) {
+    try {
+      const signingLinkResponse = await fetchJson(`${apiBase}/signinglinks/${encodeURIComponent(documentId)}`, {
+        method: "GET",
+        headers: {
+          ...buildOpenSignHeaders({ includeMasterKey: false }),
+          "X-Parse-Session-Token": sessionToken,
+        },
+      });
+      embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinkResponse));
+    } catch (fallbackError) {
+      console.error("OpenSign signinglinks fallback failed", fallbackError);
+    }
+  }
+
   if (!isSafeOpenSignUrl(embedUrl)) {
     console.error("OpenSign getDocument did not expose a signer URL", documentDebug);
     const debugError = new Error(
