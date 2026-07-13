@@ -124,6 +124,10 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
 
   try {
     const created = await createLiveSigningSession(reservation);
+    const createdDebug =
+      "debug" in created && created.debug !== undefined
+        ? created.debug ?? null
+        : null;
     const updated = await prisma.reservation.update({
       where: { publicId: reservation.publicId },
       data: {
@@ -141,7 +145,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
             sessionId: created.sessionId,
             tenantId: env.OPENSIGN_TENANT_ID ?? null,
             createdAt: new Date().toISOString(),
-            debug: created.debug ?? null,
+            debug: createdDebug,
           },
         },
       },
