@@ -43,3 +43,4 @@ volumes:
 networks:
   tonka_internal:
     name: tonka_internal
+    external: true
