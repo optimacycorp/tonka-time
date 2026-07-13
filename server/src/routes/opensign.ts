@@ -847,6 +847,27 @@ function buildOpenSignHeaders(options?: { includeMasterKey?: boolean }) {
 }
 
 function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
+  const signerObjectId = firstString([
+    getNestedString(payload, ["result", "Placeholders", "0", "signerObjId"]),
+    getNestedString(payload, ["result", "placeholders", "0", "signerObjId"]),
+    getNestedString(payload, ["Placeholders", "0", "signerObjId"]),
+    getNestedString(payload, ["placeholders", "0", "signerObjId"]),
+    getNestedString(payload, ["result", "Signers", "0", "objectId"]),
+    getNestedString(payload, ["result", "signers", "0", "objectId"]),
+    getNestedString(payload, ["Signers", "0", "objectId"]),
+    getNestedString(payload, ["signers", "0", "objectId"]),
+  ]);
+
+  if (signerObjectId && env.OPENSIGN_PUBLIC_URL) {
+    try {
+      const preferred = new URL(env.OPENSIGN_PUBLIC_URL);
+      preferred.pathname = `/load/recipientSignPdf/${encodeURIComponent(documentId)}/${encodeURIComponent(signerObjectId)}`;
+      return preferred.toString();
+    } catch {
+      // fall through to other candidates
+    }
+  }
+
   const directCandidates = collectStringValues(payload).map((value: string) => absolutizeOpenSignUrl(value));
   const rankedCandidate = directCandidates.find((value: string | null) => {
     if (!value || !isSafeOpenSignUrl(value)) {
@@ -865,7 +886,7 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
   });
 
   if (rankedCandidate) {
-    return normalizeOpenSignSignerUrl(rankedCandidate, documentId);
+    return normalizeOpenSignSignerUrl(rankedCandidate, documentId, signerObjectId ?? undefined);
   }
 
   return null;
@@ -1229,7 +1250,7 @@ function absolutizeOpenSignUrl(url: string | null) {
   }
 }
 
-function normalizeOpenSignSignerUrl(url: string | null | undefined, documentId?: string) {
+function normalizeOpenSignSignerUrl(url: string | null | undefined, documentId?: string, signerObjectId?: string) {
   const absolute = absolutizeOpenSignUrl(url ?? null);
   if (!absolute) {
     return null;
@@ -1241,8 +1262,20 @@ function normalizeOpenSignSignerUrl(url: string | null | undefined, documentId?:
     const singleSegment = pathSegments.length === 1 ? pathSegments[0] : null;
 
     if (singleSegment && (!documentId || singleSegment.toLowerCase() === documentId.toLowerCase())) {
-      parsed.pathname = `/load/recipientsignpdf/${singleSegment}`;
+      parsed.pathname = signerObjectId
+        ? `/load/recipientSignPdf/${singleSegment}/${signerObjectId}`
+        : `/load/recipientSignPdf/${singleSegment}`;
       return parsed.toString();
+    }
+
+    if (documentId && signerObjectId) {
+      const lowerSegments = pathSegments.map((segment) => segment.toLowerCase());
+      const hasRecipientRoute = lowerSegments.includes("recipientsignpdf");
+
+      if (hasRecipientRoute) {
+        parsed.pathname = `/load/recipientSignPdf/${documentId}/${signerObjectId}`;
+        return parsed.toString();
+      }
     }
 
     return parsed.toString();
