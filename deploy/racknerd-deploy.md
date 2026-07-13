@@ -72,6 +72,20 @@ This script:
 - optionally seeds default data
 - verifies Docker and Nginx status
 
+For a fuller production deploy that also refreshes the OpenSign stack, reapplies both Nginx site files, runs health checks, and can prune unused Docker data:
+
+```bash
+cd /home/deploy/apps/tonka-time
+bash deploy/deploy-racknerd-full.sh --with-opensign
+```
+
+Useful flags:
+
+- `--skip-pull` keeps the current checked-out code
+- `--seed` runs the Prisma seed
+- `--prune` removes unused Docker build cache, images, stopped containers, and unused networks after deploy
+- `--without-opensign` updates only the main Tonka app
+
 ## Self-hosted OpenSign on RackNerd
 
 OpenSign can run on the same RackNerd server as a separate Docker stack. The official OpenSign repo publishes Docker images and a compose example for self-hosting, which we adapted here so it does not conflict with your main site Nginx listener and existing app stack.
