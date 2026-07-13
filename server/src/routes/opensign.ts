@@ -517,20 +517,22 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   });
 
   const documentDebug = inspectOpenSignDocumentResponse(documentResponse, documentId);
-  let embedUrl = documentDebug.embedUrl;
+  let embedUrl: string | null = null;
+  try {
+    const signingLinkResponse = await fetchJson(`${apiBase}/signinglinks/${encodeURIComponent(documentId)}`, {
+      method: "GET",
+      headers: {
+        ...buildOpenSignHeaders({ includeMasterKey: false }),
+        "X-Parse-Session-Token": sessionToken,
+      },
+    });
+    embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinkResponse));
+  } catch (fallbackError) {
+    console.error("OpenSign signinglinks lookup failed", fallbackError);
+  }
+
   if (!isSafeOpenSignUrl(embedUrl)) {
-    try {
-      const signingLinkResponse = await fetchJson(`${apiBase}/signinglinks/${encodeURIComponent(documentId)}`, {
-        method: "GET",
-        headers: {
-          ...buildOpenSignHeaders({ includeMasterKey: false }),
-          "X-Parse-Session-Token": sessionToken,
-        },
-      });
-      embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinkResponse));
-    } catch (fallbackError) {
-      console.error("OpenSign signinglinks fallback failed", fallbackError);
-    }
+    embedUrl = documentDebug.embedUrl;
   }
 
   if (!isSafeOpenSignUrl(embedUrl)) {
