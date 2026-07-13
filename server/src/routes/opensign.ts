@@ -19,6 +19,7 @@ type OpenSignFlags = {
   sessionId?: string | null;
   tenantId?: string | null;
   createdAt?: string | null;
+  debug?: Record<string, unknown> | null;
 };
 
 function openSignConfigured() {
@@ -32,6 +33,15 @@ function openSignConfigured() {
 
 function openSignHasAdminSessionAuth() {
   return Boolean(env.OPENSIGN_USERNAME && env.OPENSIGN_PASSWORD && env.OPENSIGN_APP_ID);
+}
+
+function extractOpenSignDebug(error: unknown) {
+  if (!error || typeof error !== "object" || Array.isArray(error) || !("openSignDebug" in error)) {
+    return null;
+  }
+
+  const debug = (error as { openSignDebug?: unknown }).openSignDebug;
+  return debug && typeof debug === "object" && !Array.isArray(debug) ? (debug as Record<string, unknown>) : null;
 }
 
 router.post("/create-signing-session", asyncRoute(async (req, res) => {
@@ -130,6 +140,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
       message: "OpenSign signing session is ready.",
     });
   } catch (error) {
+    const debug = extractOpenSignDebug(error);
     await prisma.reservation.update({
       where: { publicId: reservation.publicId },
       data: {
@@ -143,6 +154,7 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
             lastError: error instanceof Error ? error.message : "Could not create the OpenSign session.",
             templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
             tenantId: env.OPENSIGN_TENANT_ID ?? null,
+            debug,
           },
         },
       },
@@ -493,11 +505,15 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     body: JSON.stringify({ docId: documentId }),
   });
 
-  const embedUrl = extractOpenSignEmbedUrl(documentResponse, documentId);
+  const documentDebug = inspectOpenSignDocumentResponse(documentResponse, documentId);
+  const embedUrl = documentDebug.embedUrl;
   if (!isSafeOpenSignUrl(embedUrl)) {
-    throw new Error(
+    console.error("OpenSign getDocument did not expose a signer URL", documentDebug);
+    const debugError = new Error(
       "OpenSign created the document, but no signer-specific URL was found in the document payload. Check that the template widgets are assigned to the Customer role and that the document was created from the saved template.",
     );
+    (debugError as Error & { openSignDebug?: Record<string, unknown> }).openSignDebug = documentDebug;
+    throw debugError;
   }
 
   return {
@@ -694,7 +710,14 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
     }
 
     const lower = value.toLowerCase();
-    return lower.includes("recipientsignpdf") || lower.includes("/load/recipientsignpdf/");
+    return (
+      lower.includes("recipientsignpdf") ||
+      lower.includes("/load/recipientsignpdf/") ||
+      lower.includes("/recipient/") ||
+      lower.includes("/sign/") ||
+      lower.includes("/submit/") ||
+      lower.includes(documentId.toLowerCase())
+    );
   });
 
   if (rankedCandidate) {
@@ -702,6 +725,77 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
   }
 
   return null;
+}
+
+function inspectOpenSignDocumentResponse(payload: unknown, documentId: string) {
+  const embedUrl = extractOpenSignEmbedUrl(payload, documentId);
+  const candidateUrls = Array.from(
+    new Set(
+      collectStringValues(payload)
+        .map((value: string) => absolutizeOpenSignUrl(value))
+        .filter((value: string | null): value is string => Boolean(value && isSafeOpenSignUrl(value))),
+    ),
+  ).slice(0, 20);
+
+  const signerCollections = [
+    getNestedArray(payload, ["signers"]),
+    getNestedArray(payload, ["Signers"]),
+    getNestedArray(payload, ["result", "signers"]),
+    getNestedArray(payload, ["result", "Signers"]),
+    getNestedArray(payload, ["data", "signers"]),
+    getNestedArray(payload, ["data", "Signers"]),
+    getNestedArray(payload, ["Recipients"]),
+    getNestedArray(payload, ["recipients"]),
+  ].filter((entry): entry is unknown[] => Array.isArray(entry));
+
+  const signerSummaries = signerCollections
+    .flatMap((collection) => collection)
+    .map((entry) => summarizeOpenSignSigner(entry))
+    .filter((entry) => entry != null)
+    .slice(0, 10);
+
+  const topLevelKeys = payload && typeof payload === "object" && !Array.isArray(payload)
+    ? Object.keys(payload as Record<string, unknown>).slice(0, 40)
+    : [];
+
+  return {
+    embedUrl,
+    candidateUrls,
+    signerSummaries,
+    topLevelKeys,
+    documentId,
+  };
+}
+
+function summarizeOpenSignSigner(entry: unknown) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return null;
+  }
+
+  return {
+    name: firstString([
+      getNestedString(entry, ["Name"]),
+      getNestedString(entry, ["name"]),
+    ]),
+    email: firstString([
+      getNestedString(entry, ["Email"]),
+      getNestedString(entry, ["email"]),
+    ]),
+    role: firstString([
+      getNestedString(entry, ["Role"]),
+      getNestedString(entry, ["role"]),
+    ]),
+    objectId: firstString([
+      getNestedString(entry, ["objectId"]),
+      getNestedString(entry, ["id"]),
+    ]),
+    link: firstString([
+      absolutizeOpenSignUrl(getNestedString(entry, ["url"])),
+      absolutizeOpenSignUrl(getNestedString(entry, ["signing_url"])),
+      absolutizeOpenSignUrl(getNestedString(entry, ["signingUrl"])),
+      absolutizeOpenSignUrl(getNestedString(entry, ["link"])),
+    ]),
+  };
 }
 
 async function fetchJson(url: string, init: RequestInit) {
