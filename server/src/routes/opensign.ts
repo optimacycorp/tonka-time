@@ -23,6 +23,13 @@ type OpenSignFlags = {
   debug?: Prisma.InputJsonValue | null;
 };
 
+type OpenSignLiveSession = {
+  sessionId: string;
+  documentId: string;
+  embedUrl: string;
+  debug?: Prisma.InputJsonValue | null;
+};
+
 function openSignConfigured() {
   return Boolean(
     env.OPENSIGN_PUBLIC_URL &&
@@ -304,7 +311,7 @@ async function createLiveSigningSession(reservation: {
   isPropertyOwner: boolean | null;
   ownerPermission: boolean | null;
   damageWaiverChoice: string;
-}) {
+}): Promise<OpenSignLiveSession> {
   if (openSignHasAdminSessionAuth()) {
     return createLiveSigningSessionViaAdminSession(reservation);
   }
@@ -335,7 +342,7 @@ async function createLiveSigningSessionViaLegacyApi(reservation: {
   isPropertyOwner: boolean | null;
   ownerPermission: boolean | null;
   damageWaiverChoice: string;
-}) {
+}): Promise<OpenSignLiveSession> {
   const apiBase = getOpenSignApiBase();
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
   const createPayload = {
@@ -380,6 +387,7 @@ async function createLiveSigningSessionViaLegacyApi(reservation: {
     sessionId: documentId,
     documentId,
     embedUrl,
+    debug: null,
   };
 }
 
@@ -400,7 +408,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   isPropertyOwner: boolean | null;
   ownerPermission: boolean | null;
   damageWaiverChoice: string;
-}) {
+}): Promise<OpenSignLiveSession> {
   const apiBase = getOpenSignApiBase();
   const sessionToken = await loginOpenSignAdmin();
   const adminUser = await fetchJson(`${apiBase}/users/me`, {
