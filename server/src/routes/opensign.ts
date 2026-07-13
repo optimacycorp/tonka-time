@@ -449,7 +449,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     throw new Error("The OpenSign template is missing ExtUserPtr.objectId, so a document cannot be created from it.");
   }
 
-  const signers = buildOpenSignDocumentSigners(reservation, contractUserId);
+  const signers = buildOpenSignDocumentSigners(reservation);
   const placeholders = buildOpenSignDocumentPlaceholders(
     getNestedArray(template, ["Placeholders"]),
     reservation,
@@ -556,7 +556,6 @@ function buildOpenSignDocumentSigners(
     email: string;
     phone: string;
   },
-  contractUserId: string,
 ) {
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
   return [
@@ -565,11 +564,6 @@ function buildOpenSignDocumentSigners(
       Email: reservation.email,
       Phone: reservation.phone || undefined,
       Role: "Customer",
-      UserId: {
-        __type: "Pointer",
-        className: "contracts_Users",
-        objectId: contractUserId,
-      },
     },
   ];
 }
