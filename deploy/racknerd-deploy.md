@@ -118,7 +118,7 @@ Then set these app env vars in `.env.production`:
 
 - `OPENSIGN_PUBLIC_URL=https://sign.tonkatimerentals.com`
 - `OPENSIGN_API_URL=https://sign.tonkatimerentals.com/api/app`
-- `OPENSIGN_INTERNAL_API_URL=http://host.docker.internal:8081/app`
+- `OPENSIGN_INTERNAL_API_URL=http://opensign-server:8080/app`
 - `OPENSIGN_TENANT_ID=...`
 - `OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL=...`
 - `OPENSIGN_API_KEY=...` if you use API-key-based document creation
@@ -128,9 +128,9 @@ Then set these app env vars in `.env.production`:
 Why the internal URL matters:
 
 - The customer-facing embed link should stay on `https://sign.tonkatimerentals.com`
-- The Tonka backend is more reliable when the app container calls the RackNerd host's local OpenSign port via `http://host.docker.internal:8081/app`
+- The Tonka backend is more reliable when the app container calls the OpenSign server container directly via `http://opensign-server:8080/app`
 - This avoids Cloudflare/Nginx hairpin issues and prevents the rental-agreement step from surfacing a generic host-level `502 Bad gateway` page when OpenSign is slow or unreachable through the public hostname
-- The Tonka app Compose file maps `host.docker.internal` to Docker's host gateway so the container can reach that local host port
+- Both Compose stacks join the shared `tonka_internal` Docker network so the Tonka app can resolve the `opensign-server` service name directly
 
 Important nginx note:
 

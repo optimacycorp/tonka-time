@@ -12,6 +12,9 @@ services:
       - opensign_files:/usr/src/app/files
     ports:
       - "127.0.0.1:8081:8080"
+    networks:
+      - default
+      - tonka_internal
 
   opensign-client:
     image: opensign/opensign:main
@@ -22,13 +25,21 @@ services:
       - opensign-server
     ports:
       - "127.0.0.1:3100:3000"
+    networks:
+      - default
 
   opensign-mongo:
     image: mongo:7
     restart: unless-stopped
     volumes:
       - opensign_mongo:/data/db
+    networks:
+      - default
 
 volumes:
   opensign_files:
   opensign_mongo:
+
+networks:
+  tonka_internal:
+    name: tonka_internal

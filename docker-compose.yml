@@ -4,12 +4,13 @@ services:
     restart: unless-stopped
     env_file:
       - .env.production
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     depends_on:
       - db
     ports:
       - "127.0.0.1:3001:3000"
+    networks:
+      - default
+      - tonka_internal
 
   db:
     image: postgres:16
@@ -20,6 +21,12 @@ services:
       POSTGRES_PASSWORD: change_me
     volumes:
       - postgres_data:/var/lib/postgresql/data
+    networks:
+      - default
 
 volumes:
   postgres_data:
+
+networks:
+  tonka_internal:
+    name: tonka_internal
