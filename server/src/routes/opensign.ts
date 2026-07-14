@@ -477,6 +477,8 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
   });
 
   const signers = buildOpenSignDocumentSigners(contactId);
+  const widgets = buildTemplateWidgetDefaults(reservation);
+  const prefill = buildTemplatePrefill(reservation);
   const placeholders = buildOpenSignDocumentPlaceholders(
     getNestedArray(template, ["Placeholders"]),
     contactId,
@@ -511,6 +513,8 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
       className: "contracts_Template",
       objectId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
     },
+    widgets,
+    prefill,
     Signers: signers,
     Placeholders: placeholders,
   };
@@ -559,7 +563,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: {
     });
     embedUrl = absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug));
   } catch (fallbackError) {
-    console.error("OpenSign signinglinks lookup failed", fallbackError);
+    console.info("OpenSign signinglinks endpoint unavailable; falling back to getDocument", fallbackError);
   }
 
   if (!isSafeOpenSignUrl(embedUrl)) {
@@ -595,12 +599,13 @@ function buildTemplateWidgetDefaults(reservation: {
   email: string;
   phone: string;
 }) {
+  const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
   return [
-    { name: "name", readonly: false, default: `${reservation.firstName} ${reservation.lastName}`.trim() },
-    { name: "email", readonly: false, default: reservation.email },
-    { name: "phone", readonly: false, default: reservation.phone },
-    { name: "company", readonly: false, default: "Tonka Time Rentals customer" },
-    { name: "job title", readonly: false, default: "Customer" },
+    ...expandWidgetAliases(["name", "customer_name"], signerName),
+    ...expandWidgetAliases(["email", "customer_email"], reservation.email),
+    ...expandWidgetAliases(["phone", "customer_phone"], reservation.phone),
+    ...expandWidgetAliases(["company"], "Tonka Time Rentals customer"),
+    ...expandWidgetAliases(["job_title", "job title"], "Customer"),
   ];
 }
 
@@ -780,22 +785,64 @@ function buildTemplatePrefill(reservation: {
   isPropertyOwner: boolean | null;
   ownerPermission: boolean | null;
   damageWaiverChoice: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
 }) {
   const [workCategory, ...workNotes] = (reservation.workDescription ?? "").split(":");
   const normalizedCategory = workNotes.length > 0 ? workCategory.trim() : "";
   const normalizedNotes = workNotes.length > 0 ? workNotes.join(":").trim() : reservation.workDescription ?? "";
+  const signerName = `${reservation.firstName ?? ""} ${reservation.lastName ?? ""}`.trim();
+  const today = new Date().toISOString().slice(0, 10);
 
   return [
-    { name: "reservation_id", response: reservation.publicId },
-    { name: "weekend_start", response: reservation.weekendStartDate.toISOString().slice(0, 10) },
-    { name: "weekend_end", response: reservation.weekendEndDate.toISOString().slice(0, 10) },
-    { name: "jobsite_address", response: `${reservation.jobsiteStreet}, ${reservation.jobsiteCity}, ${reservation.jobsiteState} ${reservation.jobsiteZip}` },
-    { name: "ticket_811", response: reservation.colorado811Ticket ?? "" },
-    { name: "work_category", response: normalizedCategory },
-    { name: "work_description", response: normalizedNotes },
-    { name: "damage_waiver_choice", response: reservation.damageWaiverChoice },
-    { name: "is_property_owner", response: reservation.isPropertyOwner == null ? "" : reservation.isPropertyOwner ? "Yes" : "No" },
-    { name: "owner_permission", response: reservation.ownerPermission == null ? "" : reservation.ownerPermission ? "Yes" : "No" },
+    ...expandPrefillAliases(["name", "customer_name"], signerName),
+    ...expandPrefillAliases(["email", "customer_email"], reservation.email),
+    ...expandPrefillAliases(["phone", "customer_phone"], reservation.phone),
+    ...expandPrefillAliases(["reservation_id", "reservationid"], reservation.publicId),
+    ...expandPrefillAliases(["weekend_start"], reservation.weekendStartDate.toISOString().slice(0, 10)),
+    ...expandPrefillAliases(["weekend_end"], reservation.weekendEndDate.toISOString().slice(0, 10)),
+    ...expandPrefillAliases(["jobsite_address"], `${reservation.jobsiteStreet}, ${reservation.jobsiteCity}, ${reservation.jobsiteState} ${reservation.jobsiteZip}`),
+    ...expandPrefillAliases(["ticket_811"], reservation.colorado811Ticket ?? ""),
+    ...expandPrefillAliases(["work_category"], normalizedCategory),
+    ...expandPrefillAliases(["work_description"], normalizedNotes),
+    ...expandPrefillAliases(["damage_waiver_choice"], reservation.damageWaiverChoice),
+    ...expandPrefillAliases(["is_property_owner"], reservation.isPropertyOwner == null ? "" : reservation.isPropertyOwner ? "Yes" : "No"),
+    ...expandPrefillAliases(["owner_permission"], reservation.ownerPermission == null ? "" : reservation.ownerPermission ? "Yes" : "No"),
+    ...expandPrefillAliases(["date_signed"], today),
+    ...expandPrefillAliases(["date_countersigned"], ""),
+    ...expandPrefillAliases(["internal_approval_note"], ""),
+    ...expandPrefillAliases(["signature_approved", "signature_approval"], ""),
+  ];
+}
+
+function expandWidgetAliases(names: string[], defaultValue: string) {
+  return Array.from(new Set(names.flatMap((name) => buildTemplateFieldAliases(name)))).map((name) => ({
+    name,
+    readonly: false,
+    default: defaultValue,
+  }));
+}
+
+function expandPrefillAliases(names: string[], response: string) {
+  return Array.from(new Set(names.flatMap((name) => buildTemplateFieldAliases(name)))).map((name) => ({
+    name,
+    response,
+  }));
+}
+
+function buildTemplateFieldAliases(name: string) {
+  const normalized = name.trim();
+  const underscored = normalized.replace(/\s+/g, "_");
+  const spaced = underscored.replace(/_/g, " ");
+  return [
+    normalized,
+    underscored,
+    spaced,
+    `{{${normalized}}}`,
+    `{{${underscored}}}`,
+    `{{${spaced}}}`,
   ];
 }
 

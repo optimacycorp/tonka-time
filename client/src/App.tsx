@@ -68,6 +68,7 @@ type CheckoutSessionStatusResponse = {
 type OpenSignSigningResponse = {
   mode: "live" | "placeholder";
   reservationPublicId?: string;
+  reservation?: ReservationSummary;
   sessionId?: string | null;
   embedUrl?: string | null;
   status?: string | null;
@@ -807,6 +808,14 @@ function ReservationFlow() {
         setSignNowMode(created.mode);
         setSignNowEmbedUrl(created.embedUrl ?? "");
         setSignNowMessage(created.message ?? "");
+        if (created.reservation) {
+          setReservationSummary(normalizeReservationSummary(created.reservation));
+        } else {
+          setReservationSummary((current) => current ? {
+            ...current,
+            signingStatus: created.status ?? current.signingStatus,
+          } : current);
+        }
         return;
       }
 
@@ -819,6 +828,33 @@ function ReservationFlow() {
       setSignNowLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (location.pathname !== "/reserve/sign" || !draft.publicId || signNowMode !== "live") {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(draft.publicId!)}`)
+        .then((status) => {
+          setReservationSummary((current) => current ? {
+            ...current,
+            signingStatus: status.status ?? current.signingStatus,
+            signedDocumentUrl: status.signedDocumentUrl ?? current.signedDocumentUrl ?? null,
+            status: status.status === "COMPLETED" ? "CONFIRMED" : current.status,
+          } : current);
+
+          if (status.status === "COMPLETED" || status.signedDocumentUrl) {
+            setSignNowMessage("Agreement completed. Continue to payment when you're ready.");
+          }
+        })
+        .catch(() => {
+          // Ignore transient polling failures while the embedded signer is open.
+        });
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [location.pathname, draft.publicId, signNowMode]);
 
   function updateField<Key extends keyof ReservationDraft>(field: Key, value: ReservationDraft[Key]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -1295,13 +1331,15 @@ function ReservationFlow() {
               <p className="mt-4 text-slate-700">
                 Review and sign the rental agreement without leaving the reservation flow. The signing step is now aligned to self-hosted OpenSign so the agreement workflow stays on your RackNerd stack.
               </p>
-              <div className="mt-6 grid gap-6 xl:grid-cols-[0.38fr_0.62fr]">
-                <div className="rounded-2xl bg-field p-5 text-white">
+              <div className="mt-6 rounded-2xl bg-field p-5 text-white">
+                <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
+                  <div>
                   <p>Reservation: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Loading..."}</p>
                   <p className="mt-2">Reservation status: {reservationSummary?.status ?? "Draft / pending payment"}</p>
                   <p className="mt-2">Agreement status: {reservationSummary?.signingStatus ?? "Preparing signature request"}</p>
                   <div className="mt-4 rounded-2xl bg-white/10 px-4 py-4 text-sm text-white/85">
                     {signNowMessage || (signNowLoading ? "Preparing your agreement..." : "Your agreement will appear here once OpenSign is ready.")}
+                  </div>
                   </div>
                   {reservationSummary?.signedDocumentUrl && (
                     <a href={reservationSummary.signedDocumentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded-full bg-white px-5 py-3 font-semibold text-field">
@@ -1309,7 +1347,8 @@ function ReservationFlow() {
                     </a>
                   )}
                 </div>
-                <div className="rounded-[1.5rem] bg-sky p-4">
+              </div>
+              <div className="mt-6 rounded-[1.5rem] bg-sky p-4">
                   {reservationSummary?.signingStatus === "COMPLETED" || reservationSummary?.signedDocumentUrl ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
                       <h3 className="font-display text-2xl text-soil">Agreement completed</h3>
@@ -1322,7 +1361,7 @@ function ReservationFlow() {
                       <iframe
                         title="OpenSign agreement signing"
                         src={signNowEmbedUrl}
-                        className="min-h-[860px] w-full"
+                        className="min-h-[1040px] w-full"
                       />
                     </div>
                   ) : signNowMode === "placeholder" ? (
@@ -1337,17 +1376,21 @@ function ReservationFlow() {
                       <p className="text-slate-600">{signNowLoading ? "Preparing your agreement..." : "Loading the signing experience..."}</p>
                     </div>
                   )}
-                </div>
               </div>
               <div className="mt-6">
                 <button
                   type="button"
                   onClick={() => navigate(`/reserve/payment?reservation=${reservationIdFromUrl}`)}
-                  disabled={reservationSummary?.signingStatus !== "COMPLETED"}
+                  disabled={reservationSummary?.signingStatus !== "COMPLETED" && !reservationSummary?.signedDocumentUrl}
                   className="rounded-full bg-soil px-6 py-3 font-semibold text-white disabled:opacity-60"
                 >
                   Continue to payment
                 </button>
+                {reservationSummary?.signingStatus !== "COMPLETED" && !reservationSummary?.signedDocumentUrl && (
+                  <p className="mt-3 text-sm text-slate-500">
+                    Finish the agreement in the embedded signer above. Payment unlocks automatically once OpenSign records the completed signature.
+                  </p>
+                )}
               </div>
             </div>
           )}
