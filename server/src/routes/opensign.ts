@@ -847,15 +847,41 @@ function buildOpenSignHeaders(options?: { includeMasterKey?: boolean }) {
 }
 
 function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
+  const placeholderCollections = [
+    getNestedArray(payload, ["result", "Placeholders"]),
+    getNestedArray(payload, ["result", "placeholders"]),
+    getNestedArray(payload, ["Placeholders"]),
+    getNestedArray(payload, ["placeholders"]),
+  ].filter((entry): entry is unknown[] => Array.isArray(entry));
+
+  const signerCollections = [
+    getNestedArray(payload, ["result", "Signers"]),
+    getNestedArray(payload, ["result", "signers"]),
+    getNestedArray(payload, ["Signers"]),
+    getNestedArray(payload, ["signers"]),
+  ].filter((entry): entry is unknown[] => Array.isArray(entry));
+
   const signerObjectId = firstString([
-    getNestedString(payload, ["result", "Placeholders", "0", "signerObjId"]),
-    getNestedString(payload, ["result", "placeholders", "0", "signerObjId"]),
-    getNestedString(payload, ["Placeholders", "0", "signerObjId"]),
-    getNestedString(payload, ["placeholders", "0", "signerObjId"]),
-    getNestedString(payload, ["result", "Signers", "0", "objectId"]),
-    getNestedString(payload, ["result", "signers", "0", "objectId"]),
-    getNestedString(payload, ["Signers", "0", "objectId"]),
-    getNestedString(payload, ["signers", "0", "objectId"]),
+    ...placeholderCollections.flatMap((collection) => {
+      const first = collection[0];
+      return first && typeof first === "object" && !Array.isArray(first)
+        ? [
+            getNestedString(first, ["signerObjId"]),
+            getNestedString(first, ["SignerObjId"]),
+            getNestedString(first, ["signerPtr", "objectId"]),
+            getNestedString(first, ["SignerPtr", "objectId"]),
+          ]
+        : [];
+    }),
+    ...signerCollections.flatMap((collection) => {
+      const first = collection[0];
+      return first && typeof first === "object" && !Array.isArray(first)
+        ? [
+            getNestedString(first, ["objectId"]),
+            getNestedString(first, ["id"]),
+          ]
+        : [];
+    }),
   ]);
 
   if (signerObjectId && env.OPENSIGN_PUBLIC_URL) {
