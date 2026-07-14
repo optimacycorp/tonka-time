@@ -724,6 +724,7 @@ function buildOpenSignDocumentPlaceholders(
     firstName: string;
     lastName: string;
     email: string;
+    phone: string;
   },
 ) {
   const placeholderValues = new Map(
