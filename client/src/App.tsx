@@ -682,6 +682,9 @@ function ReservationFlow() {
       damageWaiverChoice: draft.damageWaiverChoice,
       colorado811Ticket: draft.colorado811Ticket || undefined,
       checklistCompleted: draft.checklistCompleted,
+      checklist: draft.checklist,
+      tutorialAcknowledgement: draft.tutorialAcknowledgement,
+      waiverAcknowledged: draft.waiverAcknowledged,
     };
 
     const data = await requestJson<ReservationSummary & { publicId?: string; deliveryZone?: string }>(draft.publicId ? `/api/reservations/${draft.publicId}` : "/api/reservations", {

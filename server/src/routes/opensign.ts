@@ -30,6 +30,34 @@ type OpenSignLiveSession = {
   debug?: Prisma.InputJsonValue | null;
 };
 
+type OpenSignReservationData = {
+  publicId: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+  weekendStartDate: Date;
+  weekendEndDate: Date;
+  jobsiteStreet: string;
+  jobsiteCity: string;
+  jobsiteState: string;
+  jobsiteZip: string;
+  colorado811Ticket: string | null;
+  workDescription: string | null;
+  isPropertyOwner: boolean | null;
+  ownerPermission: boolean | null;
+  damageWaiverChoice: string;
+  deliveryFeeCents?: number | null;
+  extendedFeeCents?: number | null;
+  damageWaiverFeeCents?: number | null;
+  rentalSubtotalCents?: number | null;
+  taxCents?: number | null;
+  depositCents?: number | null;
+  totalDueCents?: number | null;
+  stripeCheckoutSessionId?: string | null;
+  checklistJson?: unknown;
+};
+
 function openSignConfigured() {
   return Boolean(
     env.OPENSIGN_PUBLIC_URL &&
@@ -196,7 +224,7 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
     return res.status(400).json({ error: "Missing reservationPublicId." });
   }
 
-  const reservation = await prisma.reservation.findUnique({ where: { publicId: parsed.data.reservationPublicId } });
+  const reservation = await syncOpenSignReservationStatus(parsed.data.reservationPublicId);
   if (!reservation) {
     return res.status(404).json({ error: "Reservation not found" });
   }
@@ -240,6 +268,76 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
       : "OpenSign is not fully configured yet.",
   });
 }));
+
+async function syncOpenSignReservationStatus(publicId: string) {
+  const reservation = await prisma.reservation.findUnique({ where: { publicId } });
+  if (!reservation) {
+    return null;
+  }
+
+  if (reservation.docusealStatus === "COMPLETED" || reservation.signedDocumentUrl || !reservation.docusealSubmissionId) {
+    return reservation;
+  }
+
+  if (!openSignConfigured() || !openSignHasAdminSessionAuth()) {
+    return reservation;
+  }
+
+  try {
+    const sessionToken = await loginOpenSignAdmin();
+    const document = await fetchJson(`${getOpenSignApiBase()}/functions/getDocument`, {
+      method: "POST",
+      headers: {
+        ...buildOpenSignHeaders({ includeMasterKey: false }),
+        "X-Parse-Session-Token": sessionToken,
+      },
+      body: JSON.stringify({ docId: reservation.docusealSubmissionId }),
+    });
+
+    const signedDocumentUrl = firstString([
+      getNestedString(document, ["result", "SignedUrl"]),
+      getNestedString(document, ["result", "signedUrl"]),
+      getNestedString(document, ["SignedUrl"]),
+      getNestedString(document, ["signedUrl"]),
+      getNestedString(document, ["data", "SignedUrl"]),
+      getNestedString(document, ["data", "signedUrl"]),
+    ]);
+
+    const isCompleted = firstBoolean([
+      getNestedBoolean(document, ["result", "IsCompleted"]),
+      getNestedBoolean(document, ["result", "isCompleted"]),
+      getNestedBoolean(document, ["IsCompleted"]),
+      getNestedBoolean(document, ["isCompleted"]),
+      getNestedBoolean(document, ["data", "IsCompleted"]),
+      getNestedBoolean(document, ["data", "isCompleted"]),
+    ]);
+
+    if (!isCompleted && !signedDocumentUrl) {
+      return reservation;
+    }
+
+    return prisma.reservation.update({
+      where: { publicId },
+      data: {
+        docusealStatus: "COMPLETED",
+        status: reservation.paymentStatus === "PAID" ? "CONFIRMED" : "PENDING_PAYMENT",
+        confirmedAt: reservation.paymentStatus === "PAID" ? reservation.confirmedAt ?? new Date() : reservation.confirmedAt,
+        signedDocumentUrl: signedDocumentUrl ?? reservation.signedDocumentUrl,
+        internalFlags: {
+          ...getLegacyFlagsObject(reservation.internalFlags),
+          opensign: {
+            ...getLegacySigningFlags(reservation.internalFlags),
+            syncedAt: new Date().toISOString(),
+            completionDetectedBy: "getDocument",
+          },
+        },
+      },
+    });
+  } catch (error) {
+    console.info("OpenSign status sync skipped", error);
+    return reservation;
+  }
+}
 
 router.post("/webhook", asyncRoute(async (req, res) => {
   const payload = req.body ?? {};
@@ -298,24 +396,7 @@ router.post("/webhook", asyncRoute(async (req, res) => {
   return res.json({ received: true });
 }));
 
-async function createLiveSigningSession(reservation: {
-  publicId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  weekendStartDate: Date;
-  weekendEndDate: Date;
-  jobsiteStreet: string;
-  jobsiteCity: string;
-  jobsiteState: string;
-  jobsiteZip: string;
-  colorado811Ticket: string | null;
-  workDescription: string | null;
-  isPropertyOwner: boolean | null;
-  ownerPermission: boolean | null;
-  damageWaiverChoice: string;
-}): Promise<OpenSignLiveSession> {
+async function createLiveSigningSession(reservation: OpenSignReservationData): Promise<OpenSignLiveSession> {
   if (openSignHasAdminSessionAuth()) {
     return createLiveSigningSessionViaAdminSession(reservation);
   }
@@ -329,24 +410,7 @@ async function createLiveSigningSession(reservation: {
   return createLiveSigningSessionViaLegacyApi(reservation);
 }
 
-async function createLiveSigningSessionViaLegacyApi(reservation: {
-  publicId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  weekendStartDate: Date;
-  weekendEndDate: Date;
-  jobsiteStreet: string;
-  jobsiteCity: string;
-  jobsiteState: string;
-  jobsiteZip: string;
-  colorado811Ticket: string | null;
-  workDescription: string | null;
-  isPropertyOwner: boolean | null;
-  ownerPermission: boolean | null;
-  damageWaiverChoice: string;
-}): Promise<OpenSignLiveSession> {
+async function createLiveSigningSessionViaLegacyApi(reservation: OpenSignReservationData): Promise<OpenSignLiveSession> {
   const apiBase = getOpenSignApiBase();
   const signerName = `${reservation.firstName} ${reservation.lastName}`.trim();
   const createPayload = {
@@ -396,24 +460,7 @@ async function createLiveSigningSessionViaLegacyApi(reservation: {
   };
 }
 
-async function createLiveSigningSessionViaAdminSession(reservation: {
-  publicId: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-  weekendStartDate: Date;
-  weekendEndDate: Date;
-  jobsiteStreet: string;
-  jobsiteCity: string;
-  jobsiteState: string;
-  jobsiteZip: string;
-  colorado811Ticket: string | null;
-  workDescription: string | null;
-  isPropertyOwner: boolean | null;
-  ownerPermission: boolean | null;
-  damageWaiverChoice: string;
-}): Promise<OpenSignLiveSession> {
+async function createLiveSigningSessionViaAdminSession(reservation: OpenSignReservationData): Promise<OpenSignLiveSession> {
   const apiBase = getOpenSignApiBase();
   const sessionToken = await loginOpenSignAdmin();
   const adminUser = await fetchJson(`${apiBase}/users/me`, {
@@ -708,24 +755,7 @@ function buildOpenSignDocumentSigners(contactId: string) {
 function buildOpenSignDocumentPlaceholders(
   templatePlaceholders: unknown[] | null,
   contactId: string,
-  reservation: {
-    publicId: string;
-    weekendStartDate: Date;
-    weekendEndDate: Date;
-    jobsiteStreet: string;
-    jobsiteCity: string;
-    jobsiteState: string;
-    jobsiteZip: string;
-    colorado811Ticket: string | null;
-    workDescription: string | null;
-    isPropertyOwner: boolean | null;
-    ownerPermission: boolean | null;
-    damageWaiverChoice: string;
-    firstName: string;
-    lastName: string;
-    email: string;
-    phone: string;
-  },
+  reservation: OpenSignReservationData,
 ) {
   const placeholderValues = new Map(
     buildTemplatePrefill(reservation).map((entry) => [entry.name.toLowerCase(), entry.response]),
@@ -773,48 +803,79 @@ function buildOpenSignDocumentPlaceholders(
   });
 }
 
-function buildTemplatePrefill(reservation: {
-  publicId: string;
-  weekendStartDate: Date;
-  weekendEndDate: Date;
-  jobsiteStreet: string;
-  jobsiteCity: string;
-  jobsiteState: string;
-  jobsiteZip: string;
-  colorado811Ticket: string | null;
-  workDescription: string | null;
-  isPropertyOwner: boolean | null;
-  ownerPermission: boolean | null;
-  damageWaiverChoice: string;
-  firstName: string;
-  lastName: string;
-  email: string;
-  phone: string;
-}) {
+function buildTemplatePrefill(reservation: OpenSignReservationData) {
   const [workCategory, ...workNotes] = (reservation.workDescription ?? "").split(":");
   const normalizedCategory = workNotes.length > 0 ? workCategory.trim() : "";
   const normalizedNotes = workNotes.length > 0 ? workNotes.join(":").trim() : reservation.workDescription ?? "";
   const signerName = `${reservation.firstName ?? ""} ${reservation.lastName ?? ""}`.trim();
   const today = new Date().toISOString().slice(0, 10);
+  const checklistData = getChecklistData(reservation.checklistJson);
+  const checklist = checklistData.checklist;
+  const tutorial = checklistData.tutorialAcknowledgement;
+  const acceptedWaiver = reservation.damageWaiverChoice === "ACCEPTED";
 
   return [
     ...expandPrefillAliases(["name", "customer_name"], signerName),
     ...expandPrefillAliases(["email", "customer_email"], reservation.email),
     ...expandPrefillAliases(["phone", "customer_phone"], reservation.phone),
     ...expandPrefillAliases(["reservation_id", "reservationid"], reservation.publicId),
+    ...expandPrefillAliases(["payment_reference"], reservation.stripeCheckoutSessionId ?? reservation.publicId),
     ...expandPrefillAliases(["weekend_start"], reservation.weekendStartDate.toISOString().slice(0, 10)),
     ...expandPrefillAliases(["weekend_end"], reservation.weekendEndDate.toISOString().slice(0, 10)),
     ...expandPrefillAliases(["jobsite_address"], `${reservation.jobsiteStreet}, ${reservation.jobsiteCity}, ${reservation.jobsiteState} ${reservation.jobsiteZip}`),
     ...expandPrefillAliases(["ticket_811"], reservation.colorado811Ticket ?? ""),
     ...expandPrefillAliases(["work_category"], normalizedCategory),
     ...expandPrefillAliases(["work_description"], normalizedNotes),
+    ...expandPrefillAliases(["weekend_rental_charge"], formatCurrencyValue(reservation.rentalSubtotalCents)),
+    ...expandPrefillAliases(["delivery_fee"], formatCurrencyValue(reservation.deliveryFeeCents)),
+    ...expandPrefillAliases(["extended_delivery_fee"], formatCurrencyValue(reservation.extendedFeeCents)),
+    ...expandPrefillAliases(["damage_waiver_fee"], formatCurrencyValue(reservation.damageWaiverFeeCents)),
+    ...expandPrefillAliases(["taxes"], formatCurrencyValue(reservation.taxCents)),
+    ...expandPrefillAliases(["security_deposit"], formatCurrencyValue(reservation.depositCents)),
+    ...expandPrefillAliases(["total_due"], formatCurrencyValue(reservation.totalDueCents)),
     ...expandPrefillAliases(["damage_waiver_choice"], reservation.damageWaiverChoice),
     ...expandPrefillAliases(["is_property_owner"], reservation.isPropertyOwner == null ? "" : reservation.isPropertyOwner ? "Yes" : "No"),
+    ...expandPrefillAliases(["is_property_owner_yes"], reservation.isPropertyOwner ? "Yes" : ""),
+    ...expandPrefillAliases(["is_property_owner_no"], reservation.isPropertyOwner === false ? "Yes" : ""),
     ...expandPrefillAliases(["owner_permission"], reservation.ownerPermission == null ? "" : reservation.ownerPermission ? "Yes" : "No"),
+    ...expandPrefillAliases(["owner_permission_yes"], reservation.ownerPermission ? "Yes" : ""),
+    ...expandPrefillAliases(["owner_permission_no"], reservation.ownerPermission === false ? "Yes" : ""),
+    ...expandPrefillAliases(["damage_waiver_accept"], acceptedWaiver ? "Yes" : ""),
+    ...expandPrefillAliases(["damage_waiver_decline"], acceptedWaiver ? "" : "Yes"),
+    ...expandPrefillAliases(["damage_waiver_acknowledged"], checklistData.waiverAcknowledged ? "Yes" : ""),
     ...expandPrefillAliases(["date_signed"], today),
     ...expandPrefillAliases(["date_countersigned"], ""),
     ...expandPrefillAliases(["internal_approval_note"], ""),
     ...expandPrefillAliases(["signature_approved", "signature_approval"], ""),
+    ...expandPrefillAliases(["machine_unit", "machine_serial", "attachments_included", "hour_meter_out", "hour_meter_in", "fuel_level_out", "fuel_level_in"], ""),
+    ...expandPrefillAliases(["authorized_operator_1", "authorized_operator_1_phone", "authorized_operator_2", "authorized_operator_2_phone"], ""),
+    ...expandPrefillAliases(["tutorial_video_version"], "quick-start-v1"),
+    ...expandPrefillAliases(["tutorial_completion_status"], allTruthy(tutorial) ? "Completed" : "Pending"),
+    ...expandPrefillAliases(["knows_boundaries"], checklist.knowsBoundaries ? "Yes" : ""),
+    ...expandPrefillAliases(["understands_fence_not_boundary"], checklist.understandsFenceNotBoundary ? "Yes" : ""),
+    ...expandPrefillAliases(["has_owner_permission"], checklist.hasOwnerPermission ? "Yes" : ""),
+    ...expandPrefillAliases(["not_digging_neighbor_property"], checklist.notDiggingNeighborProperty ? "Yes" : ""),
+    ...expandPrefillAliases(["not_digging_public_row_without_permit"], checklist.notDiggingPublicROWWithoutPermit ? "Yes" : ""),
+    ...expandPrefillAliases(["submitted_811_or_will_before_digging"], checklist.submitted811OrWillBeforeDigging ? "Yes" : ""),
+    ...expandPrefillAliases(["will_wait_for_locate_window"], checklist.willWaitForLocateWindow ? "Yes" : ""),
+    ...expandPrefillAliases(["understands_private_utilities"], checklist.understandsPrivateUtilities ? "Yes" : ""),
+    ...expandPrefillAliases(["will_avoid_utility_tolerance_zone"], checklist.willAvoidUtilityToleranceZone ? "Yes" : ""),
+    ...expandPrefillAliases(["will_not_undermine_structures"], checklist.willNotUndermineStructures ? "Yes" : ""),
+    ...expandPrefillAliases(["will_keep_people_pets_away"], checklist.willKeepPeoplePetsAway ? "Yes" : ""),
+    ...expandPrefillAliases(["will_stop_if_unsafe"], checklist.willStopIfUnsafe ? "Yes" : ""),
+    ...expandPrefillAliases(["understands_equipment_may_be_tracked"], checklist.understandsEquipmentMayBeTracked ? "Yes" : ""),
+    ...expandPrefillAliases(["consents_to_location_monitoring"], checklist.consentsToLocationMonitoring ? "Yes" : ""),
+    ...expandPrefillAliases(["will_use_only_at_approved_jobsite"], checklist.willUseOnlyAtApprovedJobsite ? "Yes" : ""),
+    ...expandPrefillAliases(["will_not_move_without_approval"], checklist.willNotMoveWithoutApproval ? "Yes" : ""),
+    ...expandPrefillAliases(["will_not_transport_without_approval"], checklist.willNotTransportWithoutApproval ? "Yes" : ""),
+    ...expandPrefillAliases(["will_not_tamper_with_tracking_device"], checklist.willNotTamperWithTrackingDevice ? "Yes" : ""),
+    ...expandPrefillAliases(["understands_geofence_breach_consequences"], checklist.understandsGeofenceBreachConsequences ? "Yes" : ""),
+    ...expandPrefillAliases(["received_quick_start_guide"], tutorial.receivedQuickStartGuide ? "Yes" : ""),
+    ...expandPrefillAliases(["understands_basic_controls"], tutorial.understandsBasicControls ? "Yes" : ""),
+    ...expandPrefillAliases(["knows_emergency_shutdown"], tutorial.knowsEmergencyShutdown ? "Yes" : ""),
+    ...expandPrefillAliases(["understands_tip_risk"], tutorial.understandsTipRisk ? "Yes" : ""),
+    ...expandPrefillAliases(["will_watch_tutorial_videos"], tutorial.willWatchTutorialVideos ? "Yes" : ""),
+    ...expandPrefillAliases(["will_call_if_unsure"], tutorial.willCallIfUnsure ? "Yes" : ""),
   ];
 }
 
@@ -845,6 +906,45 @@ function buildTemplateFieldAliases(name: string) {
     `{{${underscored}}}`,
     `{{${spaced}}}`,
   ];
+}
+
+function formatCurrencyValue(cents: number | null | undefined) {
+  if (cents == null) {
+    return "";
+  }
+
+  return `$${(cents / 100).toFixed(2)}`;
+}
+
+function getChecklistData(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {
+      checklist: {} as Record<string, boolean>,
+      tutorialAcknowledgement: {} as Record<string, boolean>,
+      waiverAcknowledged: false,
+    };
+  }
+
+  const root = value as Record<string, unknown>;
+  const checklist =
+    root.checklist && typeof root.checklist === "object" && !Array.isArray(root.checklist)
+      ? root.checklist as Record<string, boolean>
+      : {};
+  const tutorialAcknowledgement =
+    root.tutorialAcknowledgement && typeof root.tutorialAcknowledgement === "object" && !Array.isArray(root.tutorialAcknowledgement)
+      ? root.tutorialAcknowledgement as Record<string, boolean>
+      : {};
+
+  return {
+    checklist,
+    tutorialAcknowledgement,
+    waiverAcknowledged: root.waiverAcknowledged === true,
+  };
+}
+
+function allTruthy(values: Record<string, boolean>) {
+  const entries = Object.values(values);
+  return entries.length > 0 && entries.every(Boolean);
 }
 
 function getOpenSignApiBase() {
@@ -1262,6 +1362,18 @@ function getNestedString(payload: unknown, path: string[]) {
   return typeof current === "string" && current.trim() ? current.trim() : null;
 }
 
+function getNestedBoolean(payload: unknown, path: string[]) {
+  let current: unknown = payload;
+  for (const key of path) {
+    if (!current || typeof current !== "object" || Array.isArray(current) || !(key in current)) {
+      return null;
+    }
+    current = (current as Record<string, unknown>)[key];
+  }
+
+  return typeof current === "boolean" ? current : null;
+}
+
 function getNestedArray(payload: unknown, path: string[]) {
   let current: unknown = payload;
   for (const key of path) {
@@ -1288,6 +1400,10 @@ function getNestedValue(payload: unknown, path: string[]) {
 
 function firstString(values: Array<string | null | undefined>) {
   return values.find((value) => typeof value === "string" && value.trim()) ?? null;
+}
+
+function firstBoolean(values: Array<boolean | null | undefined>) {
+  return values.find((value) => typeof value === "boolean") ?? null;
 }
 
 function collectStringValues(payload: unknown, seen = new Set<unknown>()): string[] {

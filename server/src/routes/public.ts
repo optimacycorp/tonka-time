@@ -110,6 +110,13 @@ router.post("/reservations", asyncRoute(async (req, res) => {
       depositCents: pricing.depositCents,
       totalDueCents: pricing.totalDueCents,
       colorado811Ticket: parsed.data.colorado811Ticket,
+      checklistJson: parsed.data.checklist || parsed.data.tutorialAcknowledgement || parsed.data.waiverAcknowledged != null
+        ? {
+            checklist: parsed.data.checklist ?? {},
+            tutorialAcknowledgement: parsed.data.tutorialAcknowledgement ?? {},
+            waiverAcknowledged: parsed.data.waiverAcknowledged ?? false,
+          }
+        : undefined,
       holdExpiresAt: new Date(Date.now() + shortHoldMinutes * 60 * 1000),
     },
   });
@@ -158,6 +165,13 @@ router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
       rentalSubtotalCents: pricing.rentalSubtotalCents,
       depositCents: pricing.depositCents,
       totalDueCents: pricing.totalDueCents,
+      checklistJson: parsed.data.checklist || parsed.data.tutorialAcknowledgement || parsed.data.waiverAcknowledged != null
+        ? {
+            checklist: parsed.data.checklist ?? {},
+            tutorialAcknowledgement: parsed.data.tutorialAcknowledgement ?? {},
+            waiverAcknowledged: parsed.data.waiverAcknowledged ?? false,
+          }
+        : undefined,
     },
   });
 

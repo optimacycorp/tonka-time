@@ -18,6 +18,9 @@ export const reservationCreateSchema = z.object({
   ownerPermission: z.boolean().default(true),
   damageWaiverChoice: z.enum(["ACCEPTED", "DECLINED"]).default("ACCEPTED"),
   colorado811Ticket: z.string().optional(),
+  checklist: z.record(z.boolean()).optional(),
+  tutorialAcknowledgement: z.record(z.boolean()).optional(),
+  waiverAcknowledged: z.boolean().optional(),
 });
 
 export const reservationUpdateSchema = reservationCreateSchema.partial().extend({
