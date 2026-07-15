@@ -24,6 +24,21 @@ else
   SUDO="sudo"
 fi
 
+docker_cmd() {
+  if docker info >/dev/null 2>&1; then
+    docker "$@"
+  else
+    ${SUDO} docker "$@"
+  fi
+}
+
+ensure_network() {
+  if ! docker_cmd network inspect tonka_internal >/dev/null 2>&1; then
+    log "Creating shared Docker network tonka_internal"
+    docker_cmd network create tonka_internal >/dev/null
+  fi
+}
+
 log() {
   echo
   echo "==> $1"
@@ -89,8 +104,9 @@ if [[ "${SKIP_PULL}" != "true" ]]; then
 fi
 
 log "Checking Docker availability"
-  docker version >/dev/null
-  docker compose version >/dev/null
+docker_cmd version >/dev/null
+docker_cmd compose version >/dev/null
+ensure_network
 
 log "Installing Nginx site configuration"
 ${SUDO} cp "${APP_NGINX_SOURCE}" "${APP_NGINX_AVAILABLE}"
@@ -102,22 +118,22 @@ if [[ "${DEPLOY_OPENSIGN}" == "true" ]]; then
 fi
 
 log "Building and starting Tonka Time"
-docker compose -f "${APP_COMPOSE_FILE}" --env-file "${APP_ENV_FILE}" up -d --build
+docker_cmd compose -f "${APP_COMPOSE_FILE}" --env-file "${APP_ENV_FILE}" up -d --build
 
 log "Running Prisma generate"
-docker compose -f "${APP_COMPOSE_FILE}" exec -T app npm run prisma:generate
+docker_cmd compose -f "${APP_COMPOSE_FILE}" exec -T app npm run prisma:generate
 
 log "Running Prisma migrations"
-docker compose -f "${APP_COMPOSE_FILE}" exec -T app npx prisma migrate deploy --schema server/prisma/schema.prisma
+docker_cmd compose -f "${APP_COMPOSE_FILE}" exec -T app npx prisma migrate deploy --schema server/prisma/schema.prisma
 
 if [[ "${RUN_SEED}" == "true" ]]; then
   log "Running seed data"
-  docker compose -f "${APP_COMPOSE_FILE}" exec -T app npx prisma db seed --schema server/prisma/schema.prisma
+  docker_cmd compose -f "${APP_COMPOSE_FILE}" exec -T app npx prisma db seed --schema server/prisma/schema.prisma
 fi
 
 if [[ "${DEPLOY_OPENSIGN}" == "true" ]]; then
   log "Starting OpenSign stack"
-  docker compose -f "${OPENSIGN_COMPOSE_FILE}" --env-file "${OPENSIGN_ENV_FILE}" up -d
+  docker_cmd compose -f "${OPENSIGN_COMPOSE_FILE}" --env-file "${OPENSIGN_ENV_FILE}" up -d
 fi
 
 log "Reloading Nginx"
@@ -145,21 +161,21 @@ fi
 
 if [[ "${RUN_PRUNE}" == "true" ]]; then
   log "Pruning unused Docker data"
-  docker builder prune -f
-  docker image prune -a -f
-  docker container prune -f
-  docker network prune -f
+  docker_cmd builder prune -f
+  docker_cmd image prune -a -f
+  docker_cmd container prune -f
+  docker_cmd network prune -f
 fi
 
 log "Container status"
-docker compose -f "${APP_COMPOSE_FILE}" ps
+docker_cmd compose -f "${APP_COMPOSE_FILE}" ps
 
 if [[ "${DEPLOY_OPENSIGN}" == "true" ]]; then
-  docker compose -f "${OPENSIGN_COMPOSE_FILE}" ps
+  docker_cmd compose -f "${OPENSIGN_COMPOSE_FILE}" ps
 fi
 
 log "Disk usage summary"
-docker system df
+docker_cmd system df
 
 echo
 echo "Deployment complete."

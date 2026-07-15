@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EmbeddedCheckout, EmbeddedCheckoutProvider } from "@stripe/react-stripe-js";
 import { loadStripe } from "@stripe/stripe-js";
 import { NavLink, Route, Routes, useLocation, useNavigate, useSearchParams } from "react-router-dom";
@@ -570,10 +570,28 @@ function ReservationFlow() {
   const [signNowMessage, setSignNowMessage] = useState("");
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
   const reservationIdFromUrl = searchParams.get("reservation") ?? draft.publicId;
+  const normalizedReservationId = reservationIdFromUrl ?? null;
+  const previousReservationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem(draftStorageKey, JSON.stringify(draft));
   }, [draft]);
+
+  useEffect(() => {
+    if (previousReservationIdRef.current === normalizedReservationId) {
+      return;
+    }
+
+    previousReservationIdRef.current = normalizedReservationId;
+    setReservationSummary((current) => (current?.publicId === normalizedReservationId ? current : null));
+    setCheckoutClientSecret("");
+    setCheckoutPublishableKey("");
+    setCheckoutMode("");
+    setPaymentStatusMessage("");
+    setSignNowMode("");
+    setSignNowEmbedUrl("");
+    setSignNowMessage("");
+  }, [normalizedReservationId]);
 
   useEffect(() => {
     if (searchParams.get("reservation") || !draft.publicId) {
@@ -833,7 +851,7 @@ function ReservationFlow() {
       setSignNowLoading(true);
       const currentStatus = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(publicId)}`);
 
-      if (currentStatus.status === "COMPLETED" || currentStatus.signedDocumentUrl) {
+      if (currentStatus.status === "COMPLETED") {
         setSignNowMode(currentStatus.mode);
         setSignNowMessage("The agreement has already been signed.");
         setReservationSummary((current) => ({
@@ -905,7 +923,7 @@ function ReservationFlow() {
             status: status.status === "COMPLETED" ? "CONFIRMED" : current.status,
           } : current);
 
-          if (status.status === "COMPLETED" || status.signedDocumentUrl) {
+          if (status.status === "COMPLETED") {
             setSignNowMessage("Agreement completed. Continue to payment when you're ready.");
           }
         })
@@ -1400,7 +1418,7 @@ function ReservationFlow() {
                     {signNowMessage || (signNowLoading ? "Preparing your agreement..." : "Your agreement will appear here once OpenSign is ready.")}
                   </div>
                   </div>
-                  {reservationSummary?.signedDocumentUrl && (
+                  {reservationSummary?.signingStatus === "COMPLETED" && reservationSummary?.signedDocumentUrl && (
                     <a href={reservationSummary.signedDocumentUrl} target="_blank" rel="noreferrer" className="mt-4 inline-flex rounded-full bg-white px-5 py-3 font-semibold text-field">
                       Open signed copy
                     </a>
@@ -1408,7 +1426,7 @@ function ReservationFlow() {
                 </div>
               </div>
               <div className="mt-6 rounded-[1.5rem] bg-sky p-4">
-                  {reservationSummary?.signingStatus === "COMPLETED" || reservationSummary?.signedDocumentUrl ? (
+                  {reservationSummary?.signingStatus === "COMPLETED" ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
                       <h3 className="font-display text-2xl text-soil">Agreement completed</h3>
                       <p className="mt-3 text-slate-700">
@@ -1440,12 +1458,12 @@ function ReservationFlow() {
                 <button
                   type="button"
                   onClick={() => navigate(`/reserve/payment?reservation=${reservationIdFromUrl}`)}
-                  disabled={reservationSummary?.signingStatus !== "COMPLETED" && !reservationSummary?.signedDocumentUrl}
+                  disabled={reservationSummary?.signingStatus !== "COMPLETED"}
                   className="rounded-full bg-soil px-6 py-3 font-semibold text-white disabled:opacity-60"
                 >
                   Continue to payment
                 </button>
-                {reservationSummary?.signingStatus !== "COMPLETED" && !reservationSummary?.signedDocumentUrl && (
+                {reservationSummary?.signingStatus !== "COMPLETED" && (
                   <p className="mt-3 text-sm text-slate-500">
                     Finish the agreement in the embedded signer above. Payment unlocks automatically once OpenSign records the completed signature.
                   </p>

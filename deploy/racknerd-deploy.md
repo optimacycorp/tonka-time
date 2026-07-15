@@ -68,6 +68,7 @@ This script:
 - pulls the latest code
 - rebuilds containers
 - restarts the app
+- creates the shared `tonka_internal` Docker network automatically if it does not exist yet
 - runs Prisma migrations
 - optionally seeds default data
 - verifies Docker and Nginx status

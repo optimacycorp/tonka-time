@@ -12,6 +12,21 @@ else
   SUDO="sudo"
 fi
 
+docker_cmd() {
+  if docker info >/dev/null 2>&1; then
+    docker "$@"
+  else
+    ${SUDO} docker "$@"
+  fi
+}
+
+ensure_network() {
+  if ! docker_cmd network inspect tonka_internal >/dev/null 2>&1; then
+    echo "Creating shared Docker network tonka_internal..."
+    docker_cmd network create tonka_internal >/dev/null
+  fi
+}
+
 for arg in "$@"; do
   case "$arg" in
     --skip-pull)
@@ -37,18 +52,20 @@ if [[ "${SKIP_PULL}" != "true" ]]; then
   git pull --ff-only origin "${CURRENT_BRANCH}"
 fi
 
+ensure_network
+
 echo "Building and starting containers..."
-docker compose -f "${COMPOSE_FILE}" --env-file .env.production up -d --build
+docker_cmd compose -f "${COMPOSE_FILE}" --env-file .env.production up -d --build
 
 echo "Running Prisma generate..."
-docker compose -f "${COMPOSE_FILE}" exec -T app npm run prisma:generate
+docker_cmd compose -f "${COMPOSE_FILE}" exec -T app npm run prisma:generate
 
 echo "Running Prisma migrations..."
-docker compose -f "${COMPOSE_FILE}" exec -T app npx prisma migrate deploy --schema server/prisma/schema.prisma
+docker_cmd compose -f "${COMPOSE_FILE}" exec -T app npx prisma migrate deploy --schema server/prisma/schema.prisma
 
 if [[ "${RUN_SEED}" == "true" ]]; then
   echo "Running seed data..."
-  docker compose -f "${COMPOSE_FILE}" exec -T app npx prisma db seed --schema server/prisma/schema.prisma
+  docker_cmd compose -f "${COMPOSE_FILE}" exec -T app npx prisma db seed --schema server/prisma/schema.prisma
 fi
 
 echo "Reloading Nginx..."
@@ -56,4 +73,4 @@ ${SUDO} nginx -t
 ${SUDO} systemctl reload nginx
 
 echo "Deployment complete."
-docker compose -f "${COMPOSE_FILE}" ps
+docker_cmd compose -f "${COMPOSE_FILE}" ps

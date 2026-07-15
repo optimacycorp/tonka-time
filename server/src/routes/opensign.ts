@@ -232,7 +232,7 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
   const flags = getLegacySigningFlags(reservation.internalFlags);
   const embedUrl = normalizeOpenSignSignerUrl(flags.embedUrl, reservation.docusealSubmissionId ?? undefined);
 
-  if (reservation.docusealStatus === "COMPLETED" || reservation.signedDocumentUrl) {
+  if (reservation.docusealStatus === "COMPLETED") {
     return res.json({
       mode: openSignConfigured() ? "live" : "placeholder",
       reservationPublicId: reservation.publicId,
@@ -275,7 +275,7 @@ async function syncOpenSignReservationStatus(publicId: string) {
     return null;
   }
 
-  if (reservation.docusealStatus === "COMPLETED" || reservation.signedDocumentUrl || !reservation.docusealSubmissionId) {
+  if (reservation.docusealStatus === "COMPLETED" || !reservation.docusealSubmissionId) {
     return reservation;
   }
 
@@ -312,7 +312,7 @@ async function syncOpenSignReservationStatus(publicId: string) {
       getNestedBoolean(document, ["data", "isCompleted"]),
     ]);
 
-    if (!isCompleted && !signedDocumentUrl) {
+    if (isCompleted !== true) {
       return reservation;
     }
 
