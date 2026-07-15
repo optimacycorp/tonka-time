@@ -50,7 +50,7 @@ export async function renderUnsignedAgreement(
 export function resolveAgreementTemplatePath() {
   return env.AGREEMENT_TEMPLATE_DOCX_PATH
     ? path.resolve(env.AGREEMENT_TEMPLATE_DOCX_PATH)
-    : path.resolve(process.cwd(), "..", "Tonka_Time_Weekend_Rental_Agreement_Template.docx");
+    : path.resolve(process.cwd(), "..", "docs", "Tonka_Time_Weekend_Rental_Agreement_Template.docx");
 }
 
 function resolveAgreementStorageRoot() {
