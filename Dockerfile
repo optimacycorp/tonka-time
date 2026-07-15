@@ -2,7 +2,7 @@ FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates python3 libreoffice-writer \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
@@ -22,7 +22,7 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && apt-get install -y --no-install-recommends openssl ca-certificates python3 libreoffice-writer \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
@@ -34,8 +34,10 @@ RUN npm config set fetch-retries 5 \
   && npm install --omit=dev
 
 COPY --from=builder /app/server/dist ./server/dist
+COPY --from=builder /app/server/scripts ./server/scripts
 COPY --from=builder /app/client/dist ./client/dist
 COPY --from=builder /app/server/prisma ./server/prisma
+COPY --from=builder /app/docs ./docs
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
 

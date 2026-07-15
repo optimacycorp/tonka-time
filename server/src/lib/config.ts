@@ -45,6 +45,8 @@ const envSchema = z.object({
   AGREEMENT_PRIVATE_STORAGE_DIR: z.string().optional(),
   AGREEMENT_GENERATION_MODE: z.enum(["opensign_prefill", "server_pdf"]).default("server_pdf"),
   AGREEMENT_RENDER_TIMEOUT_MS: z.coerce.number().default(120000),
+  AGREEMENT_PDF_CONVERTER: z.enum(["auto", "soffice", "word"]).default("auto"),
+  AGREEMENT_OFFICE_BIN: z.string().optional(),
 });
 
 export const env = envSchema.parse(process.env);

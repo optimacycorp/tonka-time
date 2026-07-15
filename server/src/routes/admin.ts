@@ -28,7 +28,7 @@ router.get("/reservations/:publicId/agreement/status", asyncRoute(async (req, re
     templatePath: resolveAgreementTemplatePath(),
     tokenCount: agreementTokens.length,
     generationMode: "server_pdf",
-    renderStatus: "skeleton",
+    renderStatus: "docx_pdf",
   });
 }));
 
