@@ -202,12 +202,4 @@ router.post("/machines/:id/service-block", asyncRoute(async (req, res) => {
   return res.status(201).json(block);
 }));
 
-router.post("/uploads/video", asyncRoute(async (_req, res) => {
-  return res.status(501).json({ error: "Connect S3-compatible storage or UploadThing before enabling video uploads." });
-}));
-
-router.post("/uploads/site-photo", asyncRoute(async (_req, res) => {
-  return res.status(501).json({ error: "Site photo uploads are scaffolded but not wired to storage yet." });
-}));
-
 export default router;

@@ -1366,7 +1366,7 @@ function ReservationFlow() {
                       </p>
                       <h3 className="font-display text-2xl text-soil">Fake payment simulation complete</h3>
                       <p className="mt-3 text-slate-700">
-                        Because `FAKE_PAY=TRUE` and this reservation used `fakepay@tonkatimerentals.com`, the system simulated a successful paid reservation without contacting Stripe.
+                        Because `FAKE_PAY=TRUE`, the system simulated a successful paid reservation without contacting Stripe.
                       </p>
                     </div>
                   ) : checkoutMode === "placeholder" ? (
@@ -1481,7 +1481,7 @@ function ReservationFlow() {
               </p>
               <div className="mt-6 rounded-[1.75rem] bg-sky p-6">
                 <p className="font-semibold text-slate-700">Reservation ID: {reservationSummary?.publicId ?? reservationIdFromUrl ?? "Pending"}</p>
-                {(reservationSummary?.email?.toLowerCase() === "fakepay@tonkatimerentals.com" || checkoutMode === "fake") && (
+                {checkoutMode === "fake" && (
                   <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
                     Fake Pay Reservation
                   </p>
@@ -1944,7 +1944,7 @@ function AccountPage() {
                     <div className="flex flex-wrap items-start justify-between gap-4">
                       <div>
                         <h3 className="font-display text-2xl text-soil">{order.publicId}</h3>
-                        {(order.email?.toLowerCase() === "fakepay@tonkatimerentals.com" || Boolean(order.internalFlags && typeof order.internalFlags === "object" && (order.internalFlags as Record<string, unknown>).fakePay)) && (
+                        {Boolean(order.internalFlags && typeof order.internalFlags === "object" && (order.internalFlags as Record<string, unknown>).fakePay) && (
                           <p className="mt-3 inline-flex rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">
                             Fake Pay Reservation
                           </p>
@@ -2101,7 +2101,7 @@ function AdminPage() {
                 reservations.map((order) => (
                   (() => {
                     const fakePayFlags = order.internalFlags && typeof order.internalFlags === "object" ? (order.internalFlags as Record<string, unknown>).fakePay : null;
-                    const isFakeReservation = order.email?.toLowerCase() === "fakepay@tonkatimerentals.com" || Boolean(fakePayFlags);
+                    const isFakeReservation = Boolean(fakePayFlags);
                     return (
                   <article key={order.id} className="rounded-[1.5rem] border border-black/5 bg-sky p-5">
                     <div className="flex flex-wrap items-start justify-between gap-4">

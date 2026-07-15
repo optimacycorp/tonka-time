@@ -118,8 +118,7 @@ export async function deleteFakeReservationByPublicId(publicId: string) {
   const flags = getFlagsObject(reservation.internalFlags);
   const fakePay = flags.fakePay;
   const isFakeReservation =
-    reservation.email.toLowerCase() === "fakepay@tonkatimerentals.com" ||
-    (fakePay && typeof fakePay === "object" && !Array.isArray(fakePay));
+    Boolean(fakePay && typeof fakePay === "object" && !Array.isArray(fakePay));
 
   if (!isFakeReservation) {
     throw new Error("Only fake-pay reservations can be deleted from the admin dashboard.");

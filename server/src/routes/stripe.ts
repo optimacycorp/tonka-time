@@ -14,7 +14,6 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
 const stripe = env.STRIPE_SECRET_KEY ? new Stripe(env.STRIPE_SECRET_KEY) : null;
 const minimumMachineInventory = 2;
 const reservedStatuses = ["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "AWAITING_ADMIN_REVIEW", "CONFIRMED"] as const;
-const fakePayEmail = "fakepay@tonkatimerentals.com";
 
 router.post("/create-checkout-session", asyncRoute(async (req, res) => {
   const parsed = z.object({ reservationPublicId: z.string().min(1) }).safeParse(req.body);
@@ -75,7 +74,7 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
     totalDueCents: pricing.totalDueCents,
   };
 
-  if (env.FAKE_PAY && reservation.email.toLowerCase() === fakePayEmail) {
+  if (env.FAKE_PAY) {
     const updated = await prisma.reservation.update({
       where: { publicId: reservation.publicId },
       data: {
@@ -89,7 +88,6 @@ router.post("/create-checkout-session", asyncRoute(async (req, res) => {
           ...(reservation.internalFlags && typeof reservation.internalFlags === "object" && !Array.isArray(reservation.internalFlags) ? reservation.internalFlags : {}),
           fakePay: {
             enabled: true,
-            email: reservation.email,
             simulatedAt: new Date().toISOString(),
           },
         },
