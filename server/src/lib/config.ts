@@ -41,6 +41,10 @@ const envSchema = z.object({
   WEEKEND_PRICE_CENTS: z.coerce.number().default(59500),
   DAMAGE_WAIVER_FEE_CENTS: z.coerce.number().default(7500),
   DEPOSIT_CENTS: z.coerce.number().default(50000),
+  AGREEMENT_TEMPLATE_DOCX_PATH: z.string().optional(),
+  AGREEMENT_PRIVATE_STORAGE_DIR: z.string().optional(),
+  AGREEMENT_GENERATION_MODE: z.enum(["opensign_prefill", "server_pdf"]).default("server_pdf"),
+  AGREEMENT_RENDER_TIMEOUT_MS: z.coerce.number().default(120000),
 });
 
 export const env = envSchema.parse(process.env);

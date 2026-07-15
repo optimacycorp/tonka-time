@@ -3,6 +3,9 @@ import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { cancelReservationByPublicId, deleteFakeReservationByPublicId, serializeReservation } from "../lib/orders.js";
+import { buildAgreementData } from "../services/agreement/agreement-data.js";
+import { agreementTokens } from "../services/agreement/agreement-tokens.js";
+import { renderUnsignedAgreement, resolveAgreementTemplatePath } from "../services/agreement/agreement-renderer.js";
 
 const router = Router();
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
@@ -11,6 +14,50 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
 
 router.use(requireAuth);
 router.use(requireRole("ADMIN"));
+
+router.get("/reservations/:publicId/agreement/status", asyncRoute(async (req, res) => {
+  const reservation = await prisma.reservation.findUnique({
+    where: { publicId: String(req.params.publicId) },
+  });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  return res.json({
+    reservationPublicId: reservation.publicId,
+    templatePath: resolveAgreementTemplatePath(),
+    tokenCount: agreementTokens.length,
+    generationMode: "server_pdf",
+    renderStatus: "skeleton",
+  });
+}));
+
+router.get("/reservations/:publicId/agreement/preview", asyncRoute(async (req, res) => {
+  const reservation = await prisma.reservation.findUnique({
+    where: { publicId: String(req.params.publicId) },
+  });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  return res.json({
+    reservationPublicId: reservation.publicId,
+    agreementData: buildAgreementData(reservation),
+    tokenCount: agreementTokens.length,
+  });
+}));
+
+router.post("/reservations/:publicId/agreement/generate", asyncRoute(async (req, res) => {
+  const reservation = await prisma.reservation.findUnique({
+    where: { publicId: String(req.params.publicId) },
+  });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  const generated = await renderUnsignedAgreement(reservation, { force: true });
+  return res.status(202).json(generated);
+}));
 
 router.get("/reservations", asyncRoute(async (_req, res) => {
   const reservations = await prisma.reservation.findMany({
