@@ -135,32 +135,46 @@ function locateAnchorInRuns(anchor: AgreementAnchor, runs: PageTextRun[], page: 
 
   for (let start = 0; start < runs.length; start += 1) {
     let combined = "";
-    let consumed: PageTextRun[] = [];
+    const consumed: PageTextRun[] = [];
 
     for (let cursor = start; cursor < runs.length && cursor < start + MAX_WINDOW_ITEMS; cursor += 1) {
       const run = runs[cursor];
       combined += run.text;
-      consumed = [...consumed, run];
-      const normalized = normalizeAnchorText(combined);
+      consumed.push(run);
 
-      if (!target.startsWith(normalized)) {
+      if (normalizeAnchorText(combined).includes(target)) {
+        const clipped = clipRunsToAnchor(consumed, target);
+        if (clipped) {
+          const clippedRuns = clipped.runs;
+          const bounds = unionRuns(clippedRuns);
+          located.push({
+            anchor,
+            page,
+            ...bounds,
+            matchedText: combined,
+            sourceItemCount: clippedRuns.length,
+          });
+        }
         break;
       }
 
-      if (normalized === target) {
-        located.push({
-          anchor,
-          page,
-          ...unionRuns(consumed),
-          matchedText: combined,
-          sourceItemCount: consumed.length,
-        });
+      if (!couldStillContainAnchor(combined, target)) {
         break;
       }
     }
   }
 
   return dedupeLocations(located);
+}
+
+function couldStillContainAnchor(text: string, target: string) {
+  const normalized = normalizeAnchorText(text);
+  const anchorStart = normalized.indexOf("[[");
+  if (anchorStart >= 0) {
+    return target.startsWith(normalized.slice(anchorStart));
+  }
+
+  return normalized.length < target.length + 64;
 }
 
 function dedupeLocations(locations: AgreementAnchorLocation[]) {
@@ -197,6 +211,52 @@ function unionRuns(runs: PageTextRun[]) {
     width: right - left,
     height: bottom - top,
   };
+}
+
+function clipRunsToAnchor(runs: PageTextRun[], target: string) {
+  const normalizedRuns = runs.map((run) => ({
+    run,
+    normalizedText: normalizeAnchorText(run.text),
+  }));
+  const normalized = normalizedRuns.map((entry) => entry.normalizedText).join("");
+  const anchorStart = normalized.indexOf(target);
+  if (anchorStart < 0) {
+    return null;
+  }
+
+  const anchorEnd = anchorStart + target.length;
+  const clippedRuns: PageTextRun[] = [];
+  let offset = 0;
+
+  for (const entry of normalizedRuns) {
+    const segmentStart = offset;
+    const segmentEnd = offset + entry.normalizedText.length;
+    offset = segmentEnd;
+
+    if (entry.normalizedText.length === 0 || segmentEnd <= anchorStart || segmentStart >= anchorEnd) {
+      continue;
+    }
+
+    const localStart = Math.max(0, anchorStart - segmentStart);
+    const localEnd = Math.min(entry.normalizedText.length, anchorEnd - segmentStart);
+    const startRatio = localStart / entry.normalizedText.length;
+    const endRatio = localEnd / entry.normalizedText.length;
+    const clippedWidth = entry.run.width * (endRatio - startRatio);
+
+    clippedRuns.push({
+      text: target,
+      x: entry.run.x + entry.run.width * startRatio,
+      y: entry.run.y,
+      width: clippedWidth,
+      height: entry.run.height,
+    });
+  }
+
+  if (clippedRuns.length === 0) {
+    return null;
+  }
+
+  return { runs: clippedRuns };
 }
 
 function compareRuns(left: PageTextRun, right: PageTextRun) {
