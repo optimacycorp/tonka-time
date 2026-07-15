@@ -6,6 +6,7 @@ import { z } from "zod";
 import { env } from "../lib/config.js";
 import { prisma } from "../lib/prisma.js";
 import { renderUnsignedAgreement, type GeneratedAgreement } from "../services/agreement/agreement-renderer.js";
+import { buildAgreementAnchorWidgetRects } from "../services/agreement/agreement-anchor-widgets.js";
 import type { ReservationAgreementSource } from "../services/agreement/agreement-data.js";
 
 const router = Router();
@@ -537,6 +538,8 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
     reservation,
   });
 
+  const generatedAgreement = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
+  const generatedAgreementUrl = buildGeneratedAgreementUrl(reservation.publicId, generatedAgreement);
   const signers = buildOpenSignDocumentSigners(contactId);
   const widgets = buildTemplateWidgetDefaults(reservation);
   const prefill = buildTemplatePrefill(reservation);
@@ -544,9 +547,8 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
     getNestedArray(template, ["Placeholders"]),
     contactId,
     reservation,
+    generatedAgreement,
   );
-  const generatedAgreement = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
-  const generatedAgreementUrl = buildGeneratedAgreementUrl(reservation.publicId, generatedAgreement);
 
   const documentPayload: Record<string, unknown> = {
     Name: `${templateName} ${reservation.publicId}`.trim(),
@@ -805,6 +807,7 @@ function buildOpenSignDocumentPlaceholders(
   templatePlaceholders: unknown[] | null,
   contactId: string,
   reservation: OpenSignReservationData,
+  generatedAgreement: GeneratedAgreement,
 ) {
   const placeholderValues = new Map(
     buildTemplatePrefill(reservation).map((entry) => [entry.name.toLowerCase(), entry.response]),
@@ -813,7 +816,13 @@ function buildOpenSignDocumentPlaceholders(
   placeholderValues.set("email", reservation.email);
 
   const templateEntries = Array.isArray(templatePlaceholders) ? templatePlaceholders : [];
-  return templateEntries.map((entry) => {
+  const anchorPlaceholders = buildAnchorDrivenSignPlaceholders(
+    templateEntries,
+    contactId,
+    generatedAgreement,
+  );
+
+  const textPlaceholders = templateEntries.map((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
       return entry;
     }
@@ -850,6 +859,148 @@ function buildOpenSignDocumentPlaceholders(
     updated.DefaultValue = nextValue;
     return updated;
   });
+
+  if (anchorPlaceholders.length === 0) {
+    return textPlaceholders;
+  }
+
+  return [
+    ...textPlaceholders.filter((entry) => !entryMatchesSignPlaceholder(entry)),
+    ...anchorPlaceholders,
+  ];
+}
+
+function buildAnchorDrivenSignPlaceholders(
+  templateEntries: unknown[],
+  contactId: string,
+  generatedAgreement: GeneratedAgreement,
+) {
+  const widgetRects = buildAgreementAnchorWidgetRects(generatedAgreement.pdfAnchorLocateResult);
+  if (widgetRects.length === 0) {
+    return [];
+  }
+
+  const signerEntry = templateEntries.find(entryMatchesSignPlaceholder);
+  if (!signerEntry || typeof signerEntry !== "object" || Array.isArray(signerEntry)) {
+    return [];
+  }
+
+  const placeholderItems =
+    getNestedArray(signerEntry, ["placeHolder"]) ??
+    getNestedArray(signerEntry, ["placeholder"]) ??
+    [];
+
+  const prototypes = {
+    initials: findPlaceholderItemPrototype(placeholderItems, "initials"),
+    signature: findPlaceholderItemPrototype(placeholderItems, "signature"),
+    date: findPlaceholderItemPrototype(placeholderItems, "date"),
+  };
+
+  if (!prototypes.initials || !prototypes.signature || !prototypes.date) {
+    return [];
+  }
+
+  const updated = { ...(signerEntry as Record<string, unknown>) };
+  updated.signerPtr = {
+    __type: "Pointer",
+    className: "contracts_Contactbook",
+    objectId: contactId,
+  };
+  updated.signerObjId = contactId;
+  updated.placeHolder = widgetRects.map((rect) => {
+    const prototype = prototypes[rect.type];
+    return clonePlaceholderItemForRect(prototype!, rect);
+  });
+  updated.placeholder = updated.placeHolder;
+  return [updated];
+}
+
+function entryMatchesSignPlaceholder(entry: unknown) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry)) {
+    return false;
+  }
+
+  const role = firstString([
+    getNestedString(entry, ["Role"]),
+    getNestedString(entry, ["role"]),
+  ]);
+  if (role && role.toLowerCase() === "customer") {
+    return true;
+  }
+
+  const items =
+    getNestedArray(entry, ["placeHolder"]) ??
+    getNestedArray(entry, ["placeholder"]) ??
+    [];
+
+  return Array.isArray(items) && items.some((item) => isSignPlaceholderItem(item));
+}
+
+function findPlaceholderItemPrototype(items: unknown[], type: "initials" | "signature" | "date") {
+  return items.find((item) => placeholderItemMatchesType(item, type));
+}
+
+function isSignPlaceholderItem(item: unknown) {
+  return ["initials", "signature", "date"].some((type) => placeholderItemMatchesType(item, type));
+}
+
+function placeholderItemMatchesType(item: unknown, type: string) {
+  if (!item || typeof item !== "object" || Array.isArray(item)) {
+    return false;
+  }
+
+  const positions = getNestedArray(item, ["pos"]) ?? getNestedArray(item, ["Pos"]) ?? [];
+  return positions.some((position) => {
+    const positionType = firstString([
+      getNestedString(position, ["type"]),
+      getNestedString(position, ["Type"]),
+    ]);
+    return positionType?.toLowerCase() === type;
+  });
+}
+
+function clonePlaceholderItemForRect(
+  prototype: unknown,
+  rect: ReturnType<typeof buildAgreementAnchorWidgetRects>[number],
+) {
+  const cloned = cloneJsonRecord(prototype);
+  const positions = getNestedArray(cloned, ["pos"]) ?? getNestedArray(cloned, ["Pos"]) ?? [];
+  const positionTemplate =
+    Array.isArray(positions) && positions.length > 0 && positions[0] && typeof positions[0] === "object"
+      ? cloneJsonRecord(positions[0])
+      : {};
+  const options = cloneJsonRecord(
+    (typeof positionTemplate.options === "object" && positionTemplate.options && !Array.isArray(positionTemplate.options))
+      ? positionTemplate.options as Record<string, unknown>
+      : {},
+  );
+  options.name = rect.name;
+  options.required = true;
+  positionTemplate.options = options;
+  positionTemplate.type = rect.type;
+  positionTemplate.Type = rect.type;
+  setNumericField(positionTemplate, ["xPosition", "XPosition", "x"], rect.x);
+  setNumericField(positionTemplate, ["yPosition", "YPosition", "y"], rect.y);
+  setNumericField(positionTemplate, ["Width", "width", "w"], rect.width);
+  setNumericField(positionTemplate, ["Height", "height", "h"], rect.height);
+  setNumericField(positionTemplate, ["pageNumber", "PageNumber", "page", "Page"], rect.page);
+  cloned.pos = [positionTemplate];
+  cloned.Pos = [positionTemplate];
+  return cloned;
+}
+
+function setNumericField(target: Record<string, unknown>, keys: string[], value: number) {
+  for (const key of keys) {
+    target[key] = value;
+  }
+}
+
+function cloneJsonRecord(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {} as Record<string, unknown>;
+  }
+
+  return JSON.parse(JSON.stringify(value)) as Record<string, unknown>;
 }
 
 function buildTemplatePrefill(reservation: OpenSignReservationData) {

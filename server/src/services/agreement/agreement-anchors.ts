@@ -1,4 +1,4 @@
-export const agreementAnchorLayoutVersion = "a1";
+export const agreementAnchorLayoutVersion = "a2";
 
 export const agreementAnchors = [
   "OS_INITIAL_811",
@@ -9,6 +9,60 @@ export const agreementAnchors = [
 ] as const;
 
 export type AgreementAnchor = (typeof agreementAnchors)[number];
+
+export type AgreementAnchorWidgetType = "initials" | "signature" | "date";
+
+export type AgreementAnchorSpec = {
+  widgetType: AgreementAnchorWidgetType;
+  widgetName: string;
+  xOffset: number;
+  yOffset: number;
+  width: number;
+  height: number;
+};
+
+export const agreementAnchorSpecs: Record<AgreementAnchor, AgreementAnchorSpec> = {
+  OS_INITIAL_811: {
+    widgetType: "initials",
+    widgetName: "initials_811",
+    xOffset: -34,
+    yOffset: -1,
+    width: 24,
+    height: 14,
+  },
+  OS_INITIAL_TUTORIAL: {
+    widgetType: "initials",
+    widgetName: "initials_tutorial",
+    xOffset: -34,
+    yOffset: -1,
+    width: 24,
+    height: 14,
+  },
+  OS_INITIAL_DAMAGE_WAIVER: {
+    widgetType: "initials",
+    widgetName: "initials_damage_waiver",
+    xOffset: -34,
+    yOffset: -1,
+    width: 24,
+    height: 14,
+  },
+  OS_SIGNATURE_CUSTOMER: {
+    widgetType: "signature",
+    widgetName: "customer_signature",
+    xOffset: -150,
+    yOffset: -2,
+    width: 140,
+    height: 20,
+  },
+  OS_DATE_SIGNED: {
+    widgetType: "date",
+    widgetName: "date_signed",
+    xOffset: -72,
+    yOffset: -2,
+    width: 64,
+    height: 18,
+  },
+};
 
 const anchorPattern = /\[\[\s*(OS_[A-Z0-9_]+)\s*\]\]/g;
 
