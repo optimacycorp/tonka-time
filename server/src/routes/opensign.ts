@@ -1,8 +1,12 @@
 import { Router, type RequestHandler } from "express";
+import path from "node:path";
+import { createHmac } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { env } from "../lib/config.js";
 import { prisma } from "../lib/prisma.js";
+import { renderUnsignedAgreement, type GeneratedAgreement } from "../services/agreement/agreement-renderer.js";
+import type { ReservationAgreementSource } from "../services/agreement/agreement-data.js";
 
 const router = Router();
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
@@ -31,6 +35,7 @@ type OpenSignLiveSession = {
 };
 
 type OpenSignReservationData = {
+  id: string;
   publicId: string;
   firstName: string;
   lastName: string;
@@ -56,6 +61,7 @@ type OpenSignReservationData = {
   totalDueCents?: number | null;
   stripeCheckoutSessionId?: string | null;
   checklistJson?: unknown;
+  internalFlags?: unknown;
 };
 
 function openSignConfigured() {
@@ -216,6 +222,23 @@ router.post("/create-signing-session", asyncRoute(async (req, res) => {
         : "OpenSign did not return a signer session. Check the template signer role, auth key configuration, and OpenSign API URL.",
     });
   }
+}));
+
+router.get("/generated-agreement/:publicId.pdf", asyncRoute(async (req, res) => {
+  const publicId = String(req.params.publicId);
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  if (!token || !verifyGeneratedAgreementToken(publicId, token)) {
+    return res.status(403).json({ error: "Invalid agreement token." });
+  }
+
+  const reservation = await prisma.reservation.findUnique({ where: { publicId } });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  const generated = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
+  res.type("application/pdf");
+  res.sendFile(path.resolve(generated.outputPdfPath));
 }));
 
 router.get("/signing-session-status", asyncRoute(async (req, res) => {
@@ -488,15 +511,6 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
     },
   );
 
-  const templateUrl = firstString([
-    getNestedString(template, ["URL"]),
-    getNestedString(template, ["url"]),
-  ]);
-
-  if (!templateUrl) {
-    throw new Error("The OpenSign template exists, but it does not expose a source PDF URL.");
-  }
-
   const templateName =
     firstString([getNestedString(template, ["Name"]), getNestedString(template, ["name"])]) ??
     `Tonka Time Rental Agreement ${reservation.publicId}`;
@@ -531,10 +545,12 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
     contactId,
     reservation,
   );
+  const generatedAgreement = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
+  const generatedAgreementUrl = buildGeneratedAgreementUrl(reservation.publicId, generatedAgreement);
 
   const documentPayload: Record<string, unknown> = {
     Name: `${templateName} ${reservation.publicId}`.trim(),
-    URL: templateUrl,
+    URL: generatedAgreementUrl,
     Note: `Reservation ${reservation.publicId} for ${reservation.weekendStartDate.toISOString().slice(0, 10)} through ${reservation.weekendEndDate.toISOString().slice(0, 10)}`,
     Description: `Tonka Time rental agreement for ${reservation.email}`,
     ExtUserPtr: {
@@ -547,7 +563,7 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
       className: "_User",
       objectId: adminUserId,
     },
-    SignedUrl: templateUrl,
+    SignedUrl: generatedAgreementUrl,
     SentToOthers: false,
     SendinOrder: true,
     AllowModifications: false,
@@ -636,8 +652,41 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
       selectedSource: isSafeOpenSignUrl(absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug))) ? "signinglinks" : "getDocument",
       documentDebug,
       signingLinksDebug: toPrismaJson(signingLinksDebug),
+      generatedAgreement: {
+        outputPdfPath: generatedAgreement.outputPdfPath,
+        pdfPageCount: generatedAgreement.pdfPageCount,
+        sha256: generatedAgreement.sha256,
+        url: generatedAgreementUrl,
+      },
     }),
   };
+}
+
+function buildGeneratedAgreementUrl(publicId: string, generated: GeneratedAgreement) {
+  const base = new URL(env.SITE_URL);
+  base.pathname = `/api/opensign/generated-agreement/${encodeURIComponent(publicId)}.pdf`;
+  base.searchParams.set("token", signGeneratedAgreementToken(publicId));
+  base.searchParams.set("v", generated.sha256.slice(0, 12));
+  return base.toString();
+}
+
+function signGeneratedAgreementToken(publicId: string) {
+  const secret = resolveGeneratedAgreementSecret();
+  return createHmac("sha256", secret).update(publicId).digest("hex");
+}
+
+function verifyGeneratedAgreementToken(publicId: string, token: string) {
+  return token === signGeneratedAgreementToken(publicId);
+}
+
+function resolveGeneratedAgreementSecret() {
+  return (
+    env.OPENSIGN_WEBHOOK_SECRET ||
+    env.OPENSIGN_MASTER_KEY ||
+    env.OPENSIGN_API_KEY ||
+    env.STRIPE_WEBHOOK_SECRET ||
+    env.DATABASE_URL
+  );
 }
 
 function buildTemplateWidgetDefaults(reservation: {
