@@ -6,10 +6,10 @@ import { env } from "../../lib/config.js";
 import { buildAgreementData, type ReservationAgreementSource } from "./agreement-data.js";
 import { agreementTokens, findUnresolvedAgreementTokens } from "./agreement-tokens.js";
 import {
-  agreementAnchorLayoutVersion,
   type AgreementAnchorValidation,
   validateAgreementAnchors,
 } from "./agreement-anchors.js";
+import { locateAgreementAnchorsInPdf, type AgreementAnchorLocateResult } from "./agreement-anchor-locator.js";
 
 export type GeneratedAgreement = {
   reservationId: string;
@@ -25,6 +25,7 @@ export type GeneratedAgreement = {
   unresolvedTokens: string[];
   sourceAnchorValidation: AgreementAnchorValidation;
   renderedAnchorValidation: AgreementAnchorValidation;
+  pdfAnchorLocateResult: AgreementAnchorLocateResult;
   pdfPageCount: number;
   renderMode: "docx_pdf";
 };
@@ -76,6 +77,16 @@ export async function renderUnsignedAgreement(
   if (pdfPageCount <= 0) {
     throw new Error("Rendered agreement PDF did not contain any pages.");
   }
+  const pdfAnchorLocateResult = await locateAgreementAnchorsInPdf(outputPdfPath, {
+    requireAnchors: env.AGREEMENT_REQUIRE_ANCHORS === true,
+  });
+  if (env.AGREEMENT_REQUIRE_ANCHORS && pdfAnchorLocateResult.status !== "located") {
+    throw new Error(
+      `Agreement PDF anchor location failed. Missing: ${pdfAnchorLocateResult.missingAnchors.join(", ") || "none"}. ` +
+      `Duplicates: ${pdfAnchorLocateResult.duplicateAnchors.join(", ") || "none"}. ` +
+      `Unexpected: ${pdfAnchorLocateResult.unexpectedAnchors.join(", ") || "none"}.`,
+    );
+  }
 
   return {
     reservationId: reservation.id,
@@ -91,6 +102,7 @@ export async function renderUnsignedAgreement(
     unresolvedTokens,
     sourceAnchorValidation,
     renderedAnchorValidation,
+    pdfAnchorLocateResult,
     pdfPageCount,
     renderMode: "docx_pdf",
   };
