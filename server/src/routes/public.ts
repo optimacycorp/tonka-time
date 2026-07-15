@@ -147,7 +147,13 @@ router.patch("/reservations/:publicId", asyncRoute(async (req, res) => {
 
   const delivery = parsed.data.jobsiteCity ? classifyDeliveryZone(parsed.data.jobsiteCity) : null;
   const waiverChoice = parsed.data.damageWaiverChoice ?? existing.damageWaiverChoice;
-  const { packageSlug: _packageSlug, ...reservationFields } = parsed.data;
+  const {
+    packageSlug: _packageSlug,
+    checklist: _checklist,
+    tutorialAcknowledgement: _tutorialAcknowledgement,
+    waiverAcknowledged: _waiverAcknowledged,
+    ...reservationFields
+  } = parsed.data;
   const pricing = calculatePricing({
     deliveryFeeCents: delivery?.deliveryFeeCents ?? existing.deliveryFeeCents,
     damageWaiverChoice: waiverChoice,

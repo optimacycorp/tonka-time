@@ -2,7 +2,8 @@ FROM node:20-bookworm-slim AS builder
 WORKDIR /app
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates python3 libreoffice-writer \
+  && apt-get install -y --no-install-recommends openssl ca-certificates python3 python3-pip libreoffice-writer \
+  && python3 -m pip install --no-cache-dir pypdf reportlab \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
@@ -22,7 +23,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends openssl ca-certificates python3 libreoffice-writer \
+  && apt-get install -y --no-install-recommends openssl ca-certificates python3 python3-pip libreoffice-writer \
+  && python3 -m pip install --no-cache-dir pypdf reportlab \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
