@@ -239,7 +239,7 @@ router.get("/generated-agreement/:publicId.pdf", asyncRoute(async (req, res) => 
 
   const generated = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
   res.type("application/pdf");
-  res.sendFile(path.resolve(generated.outputPdfPath));
+  res.sendFile(path.resolve(generated.outputMaskedPdfPath));
 }));
 
 router.get("/signing-session-status", asyncRoute(async (req, res) => {

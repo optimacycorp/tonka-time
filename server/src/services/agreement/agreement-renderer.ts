@@ -4,12 +4,14 @@ import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { env } from "../../lib/config.js";
 import { buildAgreementData, type ReservationAgreementSource } from "./agreement-data.js";
+import { buildAgreementAnchorWidgetRects, type AgreementAnchorWidgetRect } from "./agreement-anchor-widgets.js";
 import { agreementTokens, findUnresolvedAgreementTokens } from "./agreement-tokens.js";
 import {
   type AgreementAnchorValidation,
   validateAgreementAnchors,
 } from "./agreement-anchors.js";
 import { locateAgreementAnchorsInPdf, type AgreementAnchorLocateResult } from "./agreement-anchor-locator.js";
+import { ensureAgreementPdfArtifactsScript, type AgreementPdfArtifactsPayload } from "./agreement-pdf-artifacts.js";
 
 export type GeneratedAgreement = {
   reservationId: string;
@@ -17,6 +19,9 @@ export type GeneratedAgreement = {
   outputDirectory: string;
   outputDocxPath: string;
   outputPdfPath: string;
+  outputMaskedPdfPath: string;
+  outputDebugPdfPath: string;
+  outputAnchorDataPath: string;
   outputDataPath: string;
   sha256: string;
   generatedAt: string;
@@ -26,6 +31,7 @@ export type GeneratedAgreement = {
   sourceAnchorValidation: AgreementAnchorValidation;
   renderedAnchorValidation: AgreementAnchorValidation;
   pdfAnchorLocateResult: AgreementAnchorLocateResult;
+  widgetRects: AgreementAnchorWidgetRect[];
   pdfPageCount: number;
   renderMode: "docx_pdf";
 };
@@ -43,6 +49,9 @@ export async function renderUnsignedAgreement(
   await mkdir(outputDirectory, { recursive: true });
   const outputDocxPath = path.join(outputDirectory, `${reservation.publicId}-unsigned.docx`);
   const outputPdfPath = path.join(outputDirectory, `${reservation.publicId}-unsigned.pdf`);
+  const outputMaskedPdfPath = path.join(outputDirectory, `${reservation.publicId}-unsigned-masked.pdf`);
+  const outputDebugPdfPath = path.join(outputDirectory, `${reservation.publicId}-unsigned-debug.pdf`);
+  const outputAnchorDataPath = path.join(outputDirectory, `${reservation.publicId}-anchor-layout.json`);
   const outputDataPath = path.join(outputDirectory, `${reservation.publicId}-agreement-data.json`);
 
   const fingerprint = createHash("sha256")
@@ -87,6 +96,16 @@ export async function renderUnsignedAgreement(
       `Unexpected: ${pdfAnchorLocateResult.unexpectedAnchors.join(", ") || "none"}.`,
     );
   }
+  const widgetRects = buildAgreementAnchorWidgetRects(pdfAnchorLocateResult);
+  await generateAgreementPdfArtifacts({
+    reservationPublicId: reservation.publicId,
+    outputPdfPath,
+    outputMaskedPdfPath,
+    outputDebugPdfPath,
+    outputAnchorDataPath,
+    pdfAnchorLocateResult,
+    widgetRects,
+  });
 
   return {
     reservationId: reservation.id,
@@ -94,6 +113,9 @@ export async function renderUnsignedAgreement(
     outputDirectory,
     outputDocxPath,
     outputPdfPath,
+    outputMaskedPdfPath,
+    outputDebugPdfPath,
+    outputAnchorDataPath,
     outputDataPath,
     sha256: fingerprint,
     generatedAt: new Date().toISOString(),
@@ -103,6 +125,7 @@ export async function renderUnsignedAgreement(
     sourceAnchorValidation,
     renderedAnchorValidation,
     pdfAnchorLocateResult,
+    widgetRects,
     pdfPageCount,
     renderMode: "docx_pdf",
   };
@@ -241,6 +264,32 @@ async function unzipDocx(docxPath: string, outputDirectory: string) {
   const script = path.resolve(process.cwd(), "scripts", "unzip_docx.py");
   await access(script);
   await runCommand(resolvePythonCommand(), [script, docxPath, outputDirectory]);
+}
+
+async function generateAgreementPdfArtifacts(options: {
+  reservationPublicId: string;
+  outputPdfPath: string;
+  outputMaskedPdfPath: string;
+  outputDebugPdfPath: string;
+  outputAnchorDataPath: string;
+  pdfAnchorLocateResult: AgreementAnchorLocateResult;
+  widgetRects: AgreementAnchorWidgetRect[];
+}) {
+  const script = await ensureAgreementPdfArtifactsScript();
+  const payload: AgreementPdfArtifactsPayload = {
+    layoutVersion: options.pdfAnchorLocateResult.layoutVersion,
+    reservationPublicId: options.reservationPublicId,
+    generatedAt: new Date().toISOString(),
+    sourcePdfPath: options.outputPdfPath,
+    maskedPdfPath: options.outputMaskedPdfPath,
+    debugPdfPath: options.outputDebugPdfPath,
+    anchorLocations: options.pdfAnchorLocateResult.locations,
+    widgetRects: options.widgetRects,
+  };
+  await writeFile(options.outputAnchorDataPath, JSON.stringify(payload, null, 2), "utf8");
+  await runCommand(resolvePythonCommand(), [script, options.outputAnchorDataPath]);
+  await access(options.outputMaskedPdfPath);
+  await access(options.outputDebugPdfPath);
 }
 
 function resolvePythonCommand() {

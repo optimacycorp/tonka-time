@@ -67,6 +67,19 @@ router.post("/reservations/:publicId/agreement/generate", asyncRoute(async (req,
   });
 }));
 
+router.get("/reservations/:publicId/agreement/debug.pdf", asyncRoute(async (req, res) => {
+  const reservation = await prisma.reservation.findUnique({
+    where: { publicId: String(req.params.publicId) },
+  });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  const generated = await renderUnsignedAgreement(reservation, { force: true });
+  res.type("application/pdf");
+  res.sendFile(generated.outputDebugPdfPath);
+}));
+
 router.get("/reservations", asyncRoute(async (_req, res) => {
   const reservations = await prisma.reservation.findMany({
     orderBy: { createdAt: "desc" },

@@ -1,0 +1,112 @@
+{
+  "layoutVersion": "a2",
+  "reservationPublicId": "TTR-TEST-READY",
+  "generatedAt": "2026-07-15T20:50:52.460Z",
+  "sourcePdfPath": "C:\\Users\\Costandine_T\\Downloads\\tonka-time\\server\\tmp\\agreements\\TTR-TEST-READY\\TTR-TEST-READY-unsigned.pdf",
+  "maskedPdfPath": "C:\\Users\\Costandine_T\\Downloads\\tonka-time\\server\\tmp\\agreements\\TTR-TEST-READY\\TTR-TEST-READY-unsigned-masked.pdf",
+  "debugPdfPath": "C:\\Users\\Costandine_T\\Downloads\\tonka-time\\server\\tmp\\agreements\\TTR-TEST-READY\\TTR-TEST-READY-unsigned-debug.pdf",
+  "anchorLocations": {
+    "OS_INITIAL_811": {
+      "anchor": "OS_INITIAL_811",
+      "page": 3,
+      "x": 97.344,
+      "y": 360.41,
+      "width": 10.776000000000025,
+      "height": 0.9599999999999795,
+      "matchedText": "11. Homeowner Dig Checklist[ ] [[OS_INITIAL_811]]",
+      "sourceItemCount": 1
+    },
+    "OS_INITIAL_TUTORIAL": {
+      "anchor": "OS_INITIAL_TUTORIAL",
+      "page": 4,
+      "x": 97.344,
+      "y": 493.75,
+      "width": 13.776000000000025,
+      "height": 0.9599999999999795,
+      "matchedText": "-offs, soft shoulders, ice, mud, or unsuitable surfaces.13. Prohibited Uses[ ] [[OS_INITIAL_TUTORIAL]]",
+      "sourceItemCount": 1
+    },
+    "OS_INITIAL_DAMAGE_WAIVER": {
+      "anchor": "OS_INITIAL_DAMAGE_WAIVER",
+      "page": 5,
+      "x": 97.344,
+      "y": 220.97,
+      "width": 16.77600000000004,
+      "height": 0.960000000000008,
+      "matchedText": "18. Insurance[ ] [[OS_INITIAL_DAMAGE_WAIVER]]",
+      "sourceItemCount": 1
+    },
+    "OS_SIGNATURE_CUSTOMER": {
+      "anchor": "OS_SIGNATURE_CUSTOMER",
+      "page": 7,
+      "x": 301.73,
+      "y": 713.4,
+      "width": 14.976000000000056,
+      "height": 0.9600000000000364,
+      "matchedText": " Date: __________________signature:Customer________________________ Date signed: ____________ [[OS_SIGNATURE_CUSTOMER]]",
+      "sourceItemCount": 1
+    },
+    "OS_DATE_SIGNED": {
+      "anchor": "OS_DATE_SIGNED",
+      "page": 7,
+      "x": 521.38,
+      "y": 713.4,
+      "width": 10.776000000000067,
+      "height": 0.9600000000000364,
+      "matchedText": "[[OS_DATE_SIGNED]]",
+      "sourceItemCount": 1
+    }
+  },
+  "widgetRects": [
+    {
+      "anchor": "OS_INITIAL_811",
+      "name": "initials_811",
+      "type": "initials",
+      "page": 3,
+      "x": 63.34,
+      "y": 359.41,
+      "width": 24,
+      "height": 14
+    },
+    {
+      "anchor": "OS_INITIAL_TUTORIAL",
+      "name": "initials_tutorial",
+      "type": "initials",
+      "page": 4,
+      "x": 63.34,
+      "y": 492.75,
+      "width": 24,
+      "height": 14
+    },
+    {
+      "anchor": "OS_INITIAL_DAMAGE_WAIVER",
+      "name": "initials_damage_waiver",
+      "type": "initials",
+      "page": 5,
+      "x": 63.34,
+      "y": 219.97,
+      "width": 24,
+      "height": 14
+    },
+    {
+      "anchor": "OS_SIGNATURE_CUSTOMER",
+      "name": "customer_signature",
+      "type": "signature",
+      "page": 7,
+      "x": 151.73,
+      "y": 711.4,
+      "width": 140,
+      "height": 20
+    },
+    {
+      "anchor": "OS_DATE_SIGNED",
+      "name": "date_signed",
+      "type": "date",
+      "page": 7,
+      "x": 449.38,
+      "y": 711.4,
+      "width": 64,
+      "height": 18
+    }
+  ]
+}
