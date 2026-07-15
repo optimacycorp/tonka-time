@@ -723,12 +723,34 @@ function ReservationFlow() {
       waiverAcknowledged: draft.waiverAcknowledged,
     };
 
-    const data = await requestJson<ReservationSummary & { publicId?: string; deliveryZone?: string }>(draft.publicId ? `/api/reservations/${draft.publicId}` : "/api/reservations", {
-      method: draft.publicId ? "PATCH" : "POST",
+    let targetPublicId = draft.publicId;
+    if (targetPublicId) {
+      try {
+        const existing = normalizeReservationSummary(
+          await requestJson<ReservationSummary>(`/api/reservations/${targetPublicId}`),
+        );
+        const shouldForkNewReservation =
+          existing.status === "CONFIRMED" ||
+          existing.status === "CANCELLED" ||
+          existing.paymentStatus === "PAID" ||
+          existing.paymentStatus === "REFUNDED" ||
+          existing.signingStatus === "COMPLETED";
+
+        if (shouldForkNewReservation) {
+          targetPublicId = undefined;
+          setDraft((current) => ({ ...current, publicId: undefined }));
+        }
+      } catch {
+        // If the existing reservation can't be loaded, keep the current behavior and let the save request decide.
+      }
+    }
+
+    const data = await requestJson<ReservationSummary & { publicId?: string; deliveryZone?: string }>(targetPublicId ? `/api/reservations/${targetPublicId}` : "/api/reservations", {
+      method: targetPublicId ? "PATCH" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
-    if (!draft.publicId && data.publicId) {
+    if (!targetPublicId && data.publicId) {
       setDraft((current) => ({ ...current, publicId: data.publicId, deliveryZone: data.deliveryZone }));
     } else if (data.deliveryZone) {
       setDraft((current) => ({ ...current, deliveryZone: data.deliveryZone }));
