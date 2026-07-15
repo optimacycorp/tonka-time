@@ -1,9 +1,11 @@
 import { Router, type RequestHandler } from "express";
 import { z } from "zod";
 import { prisma } from "../lib/prisma.js";
+import { env } from "../lib/config.js";
 import { requireAuth, requireRole } from "../lib/auth.js";
 import { cancelReservationByPublicId, deleteFakeReservationByPublicId, serializeReservation } from "../lib/orders.js";
 import { buildAgreementData } from "../services/agreement/agreement-data.js";
+import { agreementAnchors, agreementAnchorLayoutVersion } from "../services/agreement/agreement-anchors.js";
 import { agreementTokens } from "../services/agreement/agreement-tokens.js";
 import { renderUnsignedAgreement, resolveAgreementTemplatePath } from "../services/agreement/agreement-renderer.js";
 
@@ -27,6 +29,9 @@ router.get("/reservations/:publicId/agreement/status", asyncRoute(async (req, re
     reservationPublicId: reservation.publicId,
     templatePath: resolveAgreementTemplatePath(),
     tokenCount: agreementTokens.length,
+    anchorLayoutVersion: agreementAnchorLayoutVersion,
+    anchorRegistry: agreementAnchors,
+    anchorsRequired: env.AGREEMENT_REQUIRE_ANCHORS === true,
     generationMode: "server_pdf",
     renderStatus: "docx_pdf",
   });
@@ -56,7 +61,10 @@ router.post("/reservations/:publicId/agreement/generate", asyncRoute(async (req,
   }
 
   const generated = await renderUnsignedAgreement(reservation, { force: true });
-  return res.status(202).json(generated);
+  return res.status(202).json({
+    ...generated,
+    anchorLayoutVersion: agreementAnchorLayoutVersion,
+  });
 }));
 
 router.get("/reservations", asyncRoute(async (_req, res) => {

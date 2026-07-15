@@ -47,6 +47,10 @@ const envSchema = z.object({
   AGREEMENT_RENDER_TIMEOUT_MS: z.coerce.number().default(120000),
   AGREEMENT_PDF_CONVERTER: z.enum(["auto", "soffice", "word"]).default("auto"),
   AGREEMENT_OFFICE_BIN: z.string().optional(),
+  AGREEMENT_REQUIRE_ANCHORS: z
+    .string()
+    .optional()
+    .transform((value) => value?.toLowerCase() === "true"),
 });
 
 export const env = envSchema.parse(process.env);

@@ -1,11 +1,15 @@
-import { access, copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
-import os from "node:os";
 import { env } from "../../lib/config.js";
 import { buildAgreementData, type ReservationAgreementSource } from "./agreement-data.js";
 import { agreementTokens, findUnresolvedAgreementTokens } from "./agreement-tokens.js";
+import {
+  agreementAnchorLayoutVersion,
+  type AgreementAnchorValidation,
+  validateAgreementAnchors,
+} from "./agreement-anchors.js";
 
 export type GeneratedAgreement = {
   reservationId: string;
@@ -19,6 +23,8 @@ export type GeneratedAgreement = {
   templateTokenCount: number;
   replacedTokenCount: number;
   unresolvedTokens: string[];
+  sourceAnchorValidation: AgreementAnchorValidation;
+  renderedAnchorValidation: AgreementAnchorValidation;
   pdfPageCount: number;
   renderMode: "docx_pdf";
 };
@@ -42,6 +48,8 @@ export async function renderUnsignedAgreement(
     .update(templateBuffer)
     .update(JSON.stringify({ agreementData, force: options?.force === true }))
     .digest("hex");
+  const sourceXmlTexts = await readDocxXmlTexts(templatePath);
+  const sourceAnchorValidation = validateAgreementAnchors(sourceXmlTexts);
 
   await writeFile(outputDataPath, JSON.stringify(agreementData, null, 2), "utf8");
   await renderAgreementDocx({
@@ -52,6 +60,15 @@ export async function renderUnsignedAgreement(
   const unresolvedTokens = await scanDocxForUnresolvedTokens(outputDocxPath);
   if (unresolvedTokens.length > 0) {
     throw new Error(`Agreement render left unresolved placeholders: ${unresolvedTokens.join(", ")}`);
+  }
+  const renderedXmlTexts = await readDocxXmlTexts(outputDocxPath);
+  const renderedAnchorValidation = validateAgreementAnchors(renderedXmlTexts);
+  if (env.AGREEMENT_REQUIRE_ANCHORS && !renderedAnchorValidation.valid) {
+    throw new Error(
+      `Agreement anchor validation failed. Missing: ${renderedAnchorValidation.missingAnchors.join(", ") || "none"}. ` +
+      `Duplicates: ${renderedAnchorValidation.duplicateAnchors.join(", ") || "none"}. ` +
+      `Unexpected: ${renderedAnchorValidation.unexpectedAnchors.join(", ") || "none"}.`,
+    );
   }
 
   await convertDocxToPdf(outputDocxPath, outputPdfPath);
@@ -72,6 +89,8 @@ export async function renderUnsignedAgreement(
     templateTokenCount: agreementTokens.length,
     replacedTokenCount: agreementTokens.length,
     unresolvedTokens,
+    sourceAnchorValidation,
+    renderedAnchorValidation,
     pdfPageCount,
     renderMode: "docx_pdf",
   };
@@ -106,6 +125,18 @@ async function renderAgreementDocx(options: {
 }
 
 async function scanDocxForUnresolvedTokens(docxPath: string) {
+  const xmlTexts = await readDocxXmlTexts(docxPath);
+  const unresolved = new Set<string>();
+  for (const xml of xmlTexts) {
+    for (const token of findUnresolvedAgreementTokens(xml)) {
+      unresolved.add(token);
+    }
+  }
+
+  return [...unresolved].sort();
+}
+
+async function readDocxXmlTexts(docxPath: string) {
   const inspectionDirectory = path.join(path.dirname(docxPath), ".inspection");
   const extractedDirectory = path.join(inspectionDirectory, path.basename(docxPath, ".docx"));
   await mkdir(extractedDirectory, { recursive: true });
@@ -123,19 +154,16 @@ async function scanDocxForUnresolvedTokens(docxPath: string) {
     path.join(extractedDirectory, "word", "endnotes.xml"),
   ];
 
-  const unresolved = new Set<string>();
+  const xmlTexts: string[] = [];
   for (const xmlPath of xmlTargets) {
     try {
-      const xml = await readFile(xmlPath, "utf8");
-      for (const token of findUnresolvedAgreementTokens(xml)) {
-        unresolved.add(token);
-      }
+      xmlTexts.push(await readFile(xmlPath, "utf8"));
     } catch {
       // Ignore optional XML parts that do not exist in this template.
     }
   }
 
-  return [...unresolved].sort();
+  return xmlTexts;
 }
 
 async function convertDocxToPdf(inputDocxPath: string, outputPdfPath: string) {
