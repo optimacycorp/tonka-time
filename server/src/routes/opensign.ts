@@ -905,6 +905,9 @@ function buildTemplateFieldAliases(name: string) {
     `{{${normalized}}}`,
     `{{${underscored}}}`,
     `{{${spaced}}}`,
+    `{{ ${normalized} }}`,
+    `{{ ${underscored} }}`,
+    `{{ ${spaced} }}`,
   ];
 }
 

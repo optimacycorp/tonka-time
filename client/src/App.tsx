@@ -43,6 +43,7 @@ type ReservationSummary = {
   depositCents?: number;
   totalDueCents?: number;
   status?: string;
+  paymentStatus?: string;
   signingStatus?: string;
   docusealStatus?: string;
   signedDocumentUrl?: string | null;
@@ -568,22 +569,57 @@ function ReservationFlow() {
   const [signNowLoading, setSignNowLoading] = useState(false);
   const [signNowMessage, setSignNowMessage] = useState("");
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
+  const reservationIdFromUrl = searchParams.get("reservation") ?? draft.publicId;
 
   useEffect(() => {
     localStorage.setItem(draftStorageKey, JSON.stringify(draft));
   }, [draft]);
 
   useEffect(() => {
-    if (location.pathname === "/reserve/payment" && draft.publicId && !searchParams.get("session_id")) {
+    if (searchParams.get("reservation") || !draft.publicId) {
+      return;
+    }
+
+    void requestJson<ReservationSummary>(`/api/reservations/${draft.publicId}`)
+      .then((summary) => {
+        const normalized = normalizeReservationSummary(summary);
+        const shouldStartFresh =
+          normalized.status === "CONFIRMED" ||
+          normalized.status === "CANCELLED" ||
+          normalized.paymentStatus === "PAID" ||
+          normalized.paymentStatus === "REFUNDED" ||
+          normalized.signingStatus === "COMPLETED";
+
+        if (!shouldStartFresh) {
+          return;
+        }
+
+        setDraft((current) => ({ ...current, publicId: undefined }));
+        setReservationSummary(null);
+        setCheckoutClientSecret("");
+        setCheckoutPublishableKey("");
+        setCheckoutMode("");
+        setPaymentStatusMessage("");
+        setSignNowMode("");
+        setSignNowEmbedUrl("");
+        setSignNowMessage("");
+      })
+      .catch(() => {
+        // Leave the saved draft untouched if the summary lookup fails.
+      });
+  }, [draft.publicId, searchParams]);
+
+  useEffect(() => {
+    if (location.pathname === "/reserve/payment" && reservationIdFromUrl && !searchParams.get("session_id")) {
       void createCheckoutSession();
     }
-    if ((location.pathname === "/reserve/sign" || location.pathname === "/reserve/confirmation") && draft.publicId) {
-      void loadReservationSummary(draft.publicId);
+    if ((location.pathname === "/reserve/sign" || location.pathname === "/reserve/confirmation") && reservationIdFromUrl) {
+      void loadReservationSummary(reservationIdFromUrl);
     }
-    if (location.pathname === "/reserve/sign" && draft.publicId) {
-      void ensureSignNowSigningSession(draft.publicId);
+    if (location.pathname === "/reserve/sign" && reservationIdFromUrl) {
+      void ensureSignNowSigningSession(reservationIdFromUrl);
     }
-  }, [location.pathname, draft.publicId, searchParams]);
+  }, [location.pathname, reservationIdFromUrl, searchParams]);
 
   useEffect(() => {
     const sessionId = searchParams.get("session_id");
@@ -702,7 +738,7 @@ function ReservationFlow() {
   }
 
   async function createCheckoutSession() {
-    if (!draft.publicId || checkoutClientSecret || checkoutMode === "placeholder") {
+    if (!reservationIdFromUrl || checkoutClientSecret || checkoutMode === "placeholder") {
       return;
     }
 
@@ -712,7 +748,7 @@ function ReservationFlow() {
       const data = await requestJson<CheckoutResponse>("/api/stripe/create-checkout-session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservationPublicId: draft.publicId }),
+        body: JSON.stringify({ reservationPublicId: reservationIdFromUrl }),
       });
       setCheckoutMode(data.mode);
       setPaymentStatusMessage(data.message);
@@ -833,12 +869,12 @@ function ReservationFlow() {
   }
 
   useEffect(() => {
-    if (location.pathname !== "/reserve/sign" || !draft.publicId || signNowMode !== "live") {
+    if (location.pathname !== "/reserve/sign" || !reservationIdFromUrl || signNowMode !== "live") {
       return;
     }
 
     const intervalId = window.setInterval(() => {
-      void requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(draft.publicId!)}`)
+      void requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(reservationIdFromUrl)}`)
         .then((status) => {
           setReservationSummary((current) => current ? {
             ...current,
@@ -857,7 +893,7 @@ function ReservationFlow() {
     }, 5000);
 
     return () => window.clearInterval(intervalId);
-  }, [location.pathname, draft.publicId, signNowMode]);
+  }, [location.pathname, reservationIdFromUrl, signNowMode]);
 
   function updateField<Key extends keyof ReservationDraft>(field: Key, value: ReservationDraft[Key]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -980,8 +1016,6 @@ function ReservationFlow() {
   }
 
   const derivedWeekendEnd = draft.weekendStartDate ? getWeekendEnd(draft.weekendStartDate) : "";
-  const reservationIdFromUrl = searchParams.get("reservation") ?? draft.publicId;
-
   return (
     <SimplePage title="Reserve a Weekend" intro="This MVP flow now walks you through the actual reservation steps: package, Friday availability, delivery details, homeowner checklist, waiver election, review, payment handoff, and post-payment next steps.">
       <div className="grid gap-8 lg:grid-cols-[0.32fr_0.68fr]">
