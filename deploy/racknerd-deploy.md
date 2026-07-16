@@ -142,6 +142,7 @@ Important nginx note:
 
 - OpenSign's backend is mounted at `/app`, so `https://sign.tonkatimerentals.com/api/app` must proxy to `http://127.0.0.1:8081/app`
 - If `https://sign.tonkatimerentals.com` loads but `https://sign.tonkatimerentals.com/api/app` returns `502`, the nginx site file is usually still pointing at `/api/` instead of `/app`
+- If the signer iframe goes blank while the document status is `SENT`, check `https://sign.tonkatimerentals.com/locales/en-US/translation.json`. It must return JSON, not the OpenSign HTML shell. The shipped nginx config now aliases that request to `/locales/en/translation.json` because the current OpenSign client sometimes requests `en-US` while only `en` exists in the container image.
 
 Current code status:
 

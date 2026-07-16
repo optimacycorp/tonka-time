@@ -147,6 +147,7 @@ echo "Tonka API health check passed on http://127.0.0.1:3001/api/health"
 if [[ "${DEPLOY_OPENSIGN}" == "true" ]]; then
   curl -fsS http://127.0.0.1:8081/app/health >/dev/null 2>&1 || true
   curl -fsS http://127.0.0.1:3100 >/dev/null
+  curl -fsS http://127.0.0.1:3100/locales/en/translation.json >/dev/null
   echo "OpenSign client check passed on http://127.0.0.1:3100"
 fi
 
@@ -176,6 +177,16 @@ fi
 
 log "Disk usage summary"
 docker_cmd system df
+
+if [[ "${DEPLOY_OPENSIGN}" == "true" ]]; then
+  log "Verifying OpenSign locale alias through Nginx"
+  LOCALE_RESPONSE="$(curl -ksS -H 'Host: sign.tonkatimerentals.com' https://127.0.0.1/locales/en-US/translation.json || true)"
+  if [[ -z "${LOCALE_RESPONSE}" || "${LOCALE_RESPONSE}" == \<\!DOCTYPE\ html* || "${LOCALE_RESPONSE}" == \<html* ]]; then
+    echo "OpenSign locale alias check failed: /locales/en-US/translation.json did not return JSON"
+    exit 1
+  fi
+  echo "OpenSign locale alias check passed"
+fi
 
 echo
 echo "Deployment complete."
