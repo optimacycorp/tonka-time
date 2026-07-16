@@ -66,12 +66,16 @@ This script:
 
 - checks out the current branch
 - pulls the latest code
-- rebuilds containers
-- restarts the app
+- validates the Docker Compose config before any restart
+- rebuilds containers by default
+- restarts the app only after the image build succeeds
 - creates the shared `tonka_internal` Docker network automatically if it does not exist yet
+- runs Prisma generate inside the container
 - runs Prisma migrations
 - optionally seeds default data
-- verifies Docker and Nginx status
+- verifies the built container has the agreement template, render script, and Python PDF dependencies
+- waits for `http://127.0.0.1:3001/api/health` to pass before reloading Nginx
+- prints container status and recent app logs automatically if verification fails
 
 For a fuller production deploy that also refreshes the OpenSign stack, reapplies both Nginx site files, runs health checks, and can prune unused Docker data:
 
@@ -84,6 +88,7 @@ Useful flags:
 
 - `--skip-pull` keeps the current checked-out code
 - `--seed` runs the Prisma seed
+- `--skip-build` reuses the current image and only restarts plus verifies it
 - `--prune` removes unused Docker build cache, images, stopped containers, and unused networks after deploy
 - `--without-opensign` updates only the main Tonka app
 
