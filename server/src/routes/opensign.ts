@@ -7,7 +7,7 @@ import { env } from "../lib/config.js";
 import { prisma } from "../lib/prisma.js";
 import { renderUnsignedAgreement, type GeneratedAgreement } from "../services/agreement/agreement-renderer.js";
 import {
-  buildOpenSignDocumentPlaceholders as buildOpenSignDocumentPlaceholdersViaAdapter,
+  buildOpenSignDirectSignerPlaceholders,
   openSignWidgetAdapterVersion,
   summarizeOpenSignSubmittedWidgets,
 } from "../services/agreement/opensign-widget-adapter.js";
@@ -545,18 +545,10 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
   const generatedAgreement = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
   const generatedAgreementUrl = buildGeneratedAgreementUrl(reservation.publicId, generatedAgreement);
   const signers = buildOpenSignDocumentSigners(contactId);
-  const widgets = buildTemplateWidgetDefaults(reservation);
-  const prefill = buildTemplatePrefill(reservation);
-  const placeholderValues = new Map(
-    buildTemplatePrefill(reservation).map((entry) => [entry.name.toLowerCase(), entry.response]),
-  );
-  placeholderValues.set("name", `${reservation.firstName} ${reservation.lastName}`.trim());
-  placeholderValues.set("email", reservation.email);
-  const placeholders = buildOpenSignDocumentPlaceholdersViaAdapter({
-    templatePlaceholders: getNestedArray(template, ["Placeholders"]),
+  const placeholders = buildOpenSignDirectSignerPlaceholders({
     contactId,
-    placeholderValues,
     generatedAgreement,
+    role: "Customer",
   });
 
   const documentPayload: Record<string, unknown> = {
@@ -582,13 +574,6 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
     NotifyOnSignatures: true,
     DocSentAt: { __type: "Date", iso: new Date().toISOString() },
     IsEnableOTP: false,
-    TemplateId: {
-      __type: "Pointer",
-      className: "contracts_Template",
-      objectId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL,
-    },
-    widgets,
-    prefill,
     Signers: signers,
     Placeholders: placeholders,
   };
@@ -667,6 +652,9 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
       documentDebug,
       signingLinksDebug: toPrismaJson(signingLinksDebug),
       generatedAgreement: {
+        templateVersion: generatedAgreement.templateVersion,
+        templateSha256: generatedAgreement.templateSha256,
+        layoutVersion: generatedAgreement.layoutVersion,
         outputPdfPath: generatedAgreement.outputPdfPath,
         pdfPageCount: generatedAgreement.pdfPageCount,
         sha256: generatedAgreement.sha256,

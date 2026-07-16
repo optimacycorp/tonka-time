@@ -1,7 +1,7 @@
 import { buildAgreementAnchorWidgetRects } from "./agreement-anchor-widgets.js";
 import type { GeneratedAgreement } from "./agreement-renderer.js";
 
-export const openSignWidgetAdapterVersion = "a4-1";
+export const openSignWidgetAdapterVersion = "a5-1";
 
 export type OpenSignPlaceholderSummary = {
   name: string;
@@ -86,6 +86,39 @@ export function summarizeOpenSignSubmittedWidgets(generatedAgreement: GeneratedA
     width: rect.width,
     height: rect.height,
   }));
+}
+
+export function buildOpenSignDirectSignerPlaceholders(options: {
+  contactId: string;
+  generatedAgreement: GeneratedAgreement;
+  role?: string;
+}) {
+  const widgetRects = buildAgreementAnchorWidgetRects(options.generatedAgreement.pdfAnchorLocateResult);
+  if (widgetRects.length === 0) {
+    return [];
+  }
+
+  const signerPtr = {
+    __type: "Pointer",
+    className: "contracts_Contactbook",
+    objectId: options.contactId,
+  };
+
+  const placeholderItems = widgetRects.map((rect) => buildDirectPlaceholderItem(rect));
+
+  return [
+    {
+      Role: options.role ?? "Customer",
+      role: options.role ?? "Customer",
+      signerPtr,
+      SignerPtr: signerPtr,
+      signerObjId: options.contactId,
+      SignerObjId: options.contactId,
+      placeHolder: placeholderItems,
+      placeholder: placeholderItems,
+      PlaceHolder: placeholderItems,
+    },
+  ];
 }
 
 function buildAnchorDrivenSignPlaceholders(
@@ -221,6 +254,42 @@ function clonePlaceholderItemForRect(
   cloned.pos = [positionTemplate];
   cloned.Pos = [positionTemplate];
   return cloned;
+}
+
+function buildDirectPlaceholderItem(
+  rect: ReturnType<typeof buildAgreementAnchorWidgetRects>[number],
+) {
+  const position = {
+    type: rect.type,
+    Type: rect.type,
+    xPosition: rect.x,
+    XPosition: rect.x,
+    yPosition: rect.y,
+    YPosition: rect.y,
+    Width: rect.width,
+    width: rect.width,
+    Height: rect.height,
+    height: rect.height,
+    pageNumber: rect.page,
+    PageNumber: rect.page,
+    options: {
+      name: rect.name,
+      Name: rect.name,
+      required: true,
+      Required: true,
+      value: "",
+      Value: "",
+    },
+  };
+
+  return {
+    type: rect.type,
+    Type: rect.type,
+    pageNumber: rect.page,
+    PageNumber: rect.page,
+    pos: [position],
+    Pos: [position],
+  };
 }
 
 function setNumericField(target: Record<string, unknown>, keys: string[], value: number) {

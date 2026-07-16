@@ -16,6 +16,9 @@ import { ensureAgreementPdfArtifactsScript, type AgreementPdfArtifactsPayload } 
 export type GeneratedAgreement = {
   reservationId: string;
   templatePath: string;
+  templateVersion: string;
+  templateSha256: string;
+  layoutVersion: string;
   outputDirectory: string;
   outputDocxPath: string;
   outputPdfPath: string;
@@ -44,6 +47,8 @@ export async function renderUnsignedAgreement(
   await access(templatePath);
 
   const templateBuffer = await readFile(templatePath);
+  const templateSha256 = createHash("sha256").update(templateBuffer).digest("hex");
+  const templateVersion = buildAgreementTemplateVersion(templatePath, templateSha256);
   const agreementData = buildAgreementData(reservation);
   const outputDirectory = path.join(resolveAgreementStorageRoot(), reservation.publicId);
   await mkdir(outputDirectory, { recursive: true });
@@ -110,6 +115,9 @@ export async function renderUnsignedAgreement(
   return {
     reservationId: reservation.id,
     templatePath,
+    templateVersion,
+    templateSha256,
+    layoutVersion: pdfAnchorLocateResult.layoutVersion,
     outputDirectory,
     outputDocxPath,
     outputPdfPath,
@@ -129,6 +137,10 @@ export async function renderUnsignedAgreement(
     pdfPageCount,
     renderMode: "docx_pdf",
   };
+}
+
+function buildAgreementTemplateVersion(templatePath: string, templateSha256: string) {
+  return `${path.basename(templatePath)}:${templateSha256.slice(0, 12)}`;
 }
 
 export function resolveAgreementTemplatePath() {
