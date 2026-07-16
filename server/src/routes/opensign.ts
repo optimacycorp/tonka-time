@@ -650,6 +650,16 @@ async function createLiveSigningSessionViaAdminSession(reservation: OpenSignRese
     documentId,
     embedUrl: safeEmbedUrl,
     debug: toPrismaJson({
+      submittedWidgetRects: generatedAgreement.widgetRects,
+      submittedPlaceholderSummary: generatedAgreement.widgetRects.map((rect) => ({
+        name: rect.name,
+        type: rect.type,
+        page: rect.page,
+        x: rect.x,
+        y: rect.y,
+        width: rect.width,
+        height: rect.height,
+      })),
       selectedEmbedUrl: safeEmbedUrl,
       selectedSource: isSafeOpenSignUrl(absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug))) ? "signinglinks" : "getDocument",
       documentDebug,
@@ -833,7 +843,9 @@ function buildOpenSignDocumentPlaceholders(
       className: "contracts_Contactbook",
       objectId: contactId,
     };
+    updated.SignerPtr = updated.signerPtr;
     updated.signerObjId = contactId;
+    updated.SignerObjId = contactId;
     const key = firstString([
       getNestedString(updated, ["Name"]),
       getNestedString(updated, ["name"]),
@@ -887,6 +899,7 @@ function buildAnchorDrivenSignPlaceholders(
 
   const placeholderItems =
     getNestedArray(signerEntry, ["placeHolder"]) ??
+    getNestedArray(signerEntry, ["PlaceHolder"]) ??
     getNestedArray(signerEntry, ["placeholder"]) ??
     [];
 
@@ -906,12 +919,15 @@ function buildAnchorDrivenSignPlaceholders(
     className: "contracts_Contactbook",
     objectId: contactId,
   };
+  updated.SignerPtr = updated.signerPtr;
   updated.signerObjId = contactId;
+  updated.SignerObjId = contactId;
   updated.placeHolder = widgetRects.map((rect) => {
     const prototype = prototypes[rect.type];
     return clonePlaceholderItemForRect(prototype!, rect);
   });
   updated.placeholder = updated.placeHolder;
+  updated.PlaceHolder = updated.placeHolder;
   return [updated];
 }
 
@@ -930,6 +946,7 @@ function entryMatchesSignPlaceholder(entry: unknown) {
 
   const items =
     getNestedArray(entry, ["placeHolder"]) ??
+    getNestedArray(entry, ["PlaceHolder"]) ??
     getNestedArray(entry, ["placeholder"]) ??
     [];
 
@@ -969,14 +986,19 @@ function clonePlaceholderItemForRect(
     Array.isArray(positions) && positions.length > 0 && positions[0] && typeof positions[0] === "object"
       ? cloneJsonRecord(positions[0])
       : {};
-  const options = cloneJsonRecord(
+  const rawOptions =
     (typeof positionTemplate.options === "object" && positionTemplate.options && !Array.isArray(positionTemplate.options))
       ? positionTemplate.options as Record<string, unknown>
-      : {},
-  );
+      : (typeof positionTemplate.Options === "object" && positionTemplate.Options && !Array.isArray(positionTemplate.Options))
+        ? positionTemplate.Options as Record<string, unknown>
+        : {};
+  const options = cloneJsonRecord(rawOptions);
   options.name = rect.name;
+  options.Name = rect.name;
   options.required = true;
+  options.Required = true;
   positionTemplate.options = options;
+  positionTemplate.Options = options;
   positionTemplate.type = rect.type;
   positionTemplate.Type = rect.type;
   setNumericField(positionTemplate, ["xPosition", "XPosition", "x"], rect.x);
@@ -984,6 +1006,8 @@ function clonePlaceholderItemForRect(
   setNumericField(positionTemplate, ["Width", "width", "w"], rect.width);
   setNumericField(positionTemplate, ["Height", "height", "h"], rect.height);
   setNumericField(positionTemplate, ["pageNumber", "PageNumber", "page", "Page"], rect.page);
+  cloned.type = rect.type;
+  cloned.Type = rect.type;
   cloned.pos = [positionTemplate];
   cloned.Pos = [positionTemplate];
   return cloned;
