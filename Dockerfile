@@ -3,7 +3,7 @@ WORKDIR /app
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates python3 python3-pip libreoffice-writer \
-  && python3 -m pip install --no-cache-dir pypdf reportlab \
+  && python3 -m pip install --break-system-packages --no-cache-dir pypdf reportlab \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
@@ -25,7 +25,7 @@ ENV NODE_ENV=production
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates python3 python3-pip libreoffice-writer \
-  && python3 -m pip install --no-cache-dir pypdf reportlab \
+  && python3 -m pip install --break-system-packages --no-cache-dir pypdf reportlab \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
