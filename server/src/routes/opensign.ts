@@ -980,11 +980,11 @@ function clonePlaceholderItemForRect(
   prototype: unknown,
   rect: ReturnType<typeof buildAgreementAnchorWidgetRects>[number],
 ) {
-  const cloned = cloneJsonRecord(prototype);
+  const cloned = stripPlaceholderIdentifiers(cloneJsonRecord(prototype));
   const positions = getNestedArray(cloned, ["pos"]) ?? getNestedArray(cloned, ["Pos"]) ?? [];
   const positionTemplate =
     Array.isArray(positions) && positions.length > 0 && positions[0] && typeof positions[0] === "object"
-      ? cloneJsonRecord(positions[0])
+      ? stripPlaceholderIdentifiers(cloneJsonRecord(positions[0]))
       : {};
   const rawOptions =
     (typeof positionTemplate.options === "object" && positionTemplate.options && !Array.isArray(positionTemplate.options))
@@ -992,13 +992,17 @@ function clonePlaceholderItemForRect(
       : (typeof positionTemplate.Options === "object" && positionTemplate.Options && !Array.isArray(positionTemplate.Options))
         ? positionTemplate.Options as Record<string, unknown>
         : {};
-  const options = cloneJsonRecord(rawOptions);
+  const options = stripPlaceholderIdentifiers(cloneJsonRecord(rawOptions));
   options.name = rect.name;
   options.Name = rect.name;
   options.required = true;
   options.Required = true;
+  options.value = "";
+  options.Value = "";
   positionTemplate.options = options;
   positionTemplate.Options = options;
+  positionTemplate.name = rect.name;
+  positionTemplate.Name = rect.name;
   positionTemplate.type = rect.type;
   positionTemplate.Type = rect.type;
   setNumericField(positionTemplate, ["xPosition", "XPosition", "x"], rect.x);
@@ -1011,6 +1015,26 @@ function clonePlaceholderItemForRect(
   cloned.pos = [positionTemplate];
   cloned.Pos = [positionTemplate];
   return cloned;
+}
+
+function stripPlaceholderIdentifiers(target: Record<string, unknown>) {
+  for (const key of [
+    "id",
+    "Id",
+    "objectId",
+    "createdAt",
+    "updatedAt",
+    "CreatedAt",
+    "UpdatedAt",
+    "key",
+    "Key",
+    "uuid",
+    "UUID",
+  ]) {
+    delete target[key];
+  }
+
+  return target;
 }
 
 function setNumericField(target: Record<string, unknown>, keys: string[], value: number) {

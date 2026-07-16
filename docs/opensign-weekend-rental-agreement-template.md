@@ -111,8 +111,8 @@ Location data may be used for delivery, pickup, customer support, maintenance, g
 - Customer will not allow unauthorized, untrained, impaired, distracted, or incompetent operators to use the equipment.
 - Customer will immediately stop use if the equipment appears unsafe, damaged, leaking, unstable, overheated, or malfunctioning.
 
-**Property owner?** [ ] Yes `{{is_property_owner_yes}}` [ ] No `{{is_property_owner_no}}`  
-**Owner permission confirmed?** [ ] Yes `{{owner_permission_yes}}` [ ] No `{{owner_permission_no}}`
+**Property owner?** [`{{is_property_owner_yes}}`] Yes [`{{is_property_owner_no}}`] No  
+**Owner permission confirmed?** [`{{owner_permission_yes}}`] Yes [`{{owner_permission_no}}`] No
 
 ---
 
@@ -146,25 +146,25 @@ Customer initials - 811/private utilities responsibility: __________
 
 Customer must complete and affirm each item before delivery/release and again before operating if site conditions change.
 
-- [ ] I know my property boundaries. (`{{knows_boundaries}}`)
-- [ ] I understand fences, landscaping, and driveways may not be property lines. (`{{understands_fence_not_boundary}}`)
-- [ ] I have permission to dig at the approved jobsite. (`{{has_owner_permission}}`)
-- [ ] I will not dig on neighboring property. (`{{not_digging_neighbor_property}}`)
-- [ ] I will not dig in a public right-of-way without required permit or permission. (`{{not_digging_public_row_without_permit}}`)
-- [ ] I submitted, or will submit before digging, a Colorado 811 request. (`{{submitted_811_or_will_before_digging}}`)
-- [ ] I will wait for the locate window and review utility responses before digging. (`{{will_wait_for_locate_window}}`)
-- [ ] I understand private utilities may not be marked by 811. (`{{understands_private_utilities}}`)
-- [ ] I will avoid utility tolerance zones unless hand digging and extra care are used as required. (`{{will_avoid_utility_tolerance_zone}}`)
-- [ ] I will not undermine structures, slabs, retaining walls, driveways, sidewalks, trees, slopes, roads, fences, or utilities without a safe plan. (`{{will_not_undermine_structures}}`)
-- [ ] I will keep children, pets, vehicles, and bystanders away from the work area. (`{{will_keep_people_pets_away}}`)
-- [ ] I will stop and call Tonka Time Rentals if the machine leaks, overheats, throws a track, becomes stuck, or seems unsafe. (`{{will_stop_if_unsafe}}`)
-- [ ] I understand the excavator may contain GPS, geofence, telematics, or anti-theft tracking technology. (`{{understands_equipment_may_be_tracked}}`)
-- [ ] I consent to Tonka Time Rentals monitoring equipment location during the rental period and until the equipment is returned or recovered. (`{{consents_to_location_monitoring}}`)
-- [ ] I understand the excavator may be used only at the approved jobsite address. (`{{will_use_only_at_approved_jobsite}}`)
-- [ ] I will not move the excavator to another property or jobsite without prior written approval. (`{{will_not_move_without_approval}}`)
-- [ ] I will not load, haul, tow, or transport the excavator on my own trailer, truck, rollback, or other vehicle without prior written approval. (`{{will_not_transport_without_approval}}`)
-- [ ] I will not remove, disable, cover, block, or tamper with any GPS, tracker, lock, key, or security device. (`{{will_not_tamper_with_tracking_device}}`)
-- [ ] I understand that unauthorized movement, geofence breach, tracker tampering, or unapproved transport may result in rental termination, recovery fees, deposit retention, and additional claims. (`{{understands_geofence_breach_consequences}}`)
+- [`{{knows_boundaries}}`] I know my property boundaries.
+- [`{{understands_fence_not_boundary}}`] I understand fences, landscaping, and driveways may not be property lines.
+- [`{{has_owner_permission}}`] I have permission to dig at the approved jobsite.
+- [`{{not_digging_neighbor_property}}`] I will not dig on neighboring property.
+- [`{{not_digging_public_row_without_permit}}`] I will not dig in a public right-of-way without required permit or permission.
+- [`{{submitted_811_or_will_before_digging}}`] I submitted, or will submit before digging, a Colorado 811 request.
+- [`{{will_wait_for_locate_window}}`] I will wait for the locate window and review utility responses before digging.
+- [`{{understands_private_utilities}}`] I understand private utilities may not be marked by 811.
+- [`{{will_avoid_utility_tolerance_zone}}`] I will avoid utility tolerance zones unless hand digging and extra care are used as required.
+- [`{{will_not_undermine_structures}}`] I will not undermine structures, slabs, retaining walls, driveways, sidewalks, trees, slopes, roads, fences, or utilities without a safe plan.
+- [`{{will_keep_people_pets_away}}`] I will keep children, pets, vehicles, and bystanders away from the work area.
+- [`{{will_stop_if_unsafe}}`] I will stop and call Tonka Time Rentals if the machine leaks, overheats, throws a track, becomes stuck, or seems unsafe.
+- [`{{understands_equipment_may_be_tracked}}`] I understand the excavator may contain GPS, geofence, telematics, or anti-theft tracking technology.
+- [`{{consents_to_location_monitoring}}`] I consent to Tonka Time Rentals monitoring equipment location during the rental period and until the equipment is returned or recovered.
+- [`{{will_use_only_at_approved_jobsite}}`] I understand the excavator may be used only at the approved jobsite address.
+- [`{{will_not_move_without_approval}}`] I will not move the excavator to another property or jobsite without prior written approval.
+- [`{{will_not_transport_without_approval}}`] I will not load, haul, tow, or transport the excavator on my own trailer, truck, rollback, or other vehicle without prior written approval.
+- [`{{will_not_tamper_with_tracking_device}}`] I will not remove, disable, cover, block, or tamper with any GPS, tracker, lock, key, or security device.
+- [`{{understands_geofence_breach_consequences}}`] I understand that unauthorized movement, geofence breach, tracker tampering, or unapproved transport may result in rental termination, recovery fees, deposit retention, and additional claims.
 
 ---
 
@@ -172,12 +172,12 @@ Customer must complete and affirm each item before delivery/release and again be
 
 Tonka Time Rentals may provide a quick start guide, in-person orientation, video tutorials, troubleshooting guidance, and safety reminders. These materials are general orientation only. They are not professional excavation training, jobsite engineering, construction supervision, utility locating, survey services, or legal/permit advice.
 
-- [ ] I received or had access to the quick start guide. (`{{received_quick_start_guide}}`)
-- [ ] I understand the basic controls well enough to operate safely or will not operate. (`{{understands_basic_controls}}`)
-- [ ] I know how to perform an emergency shutdown and lower the boom/bucket safely. (`{{knows_emergency_shutdown}}`)
-- [ ] I understand rollover, tip-over, slope, overhead, and blind-spot risks. (`{{understands_tip_risk}}`)
-- [ ] I will watch the required tutorial videos before operating. (`{{will_watch_tutorial_videos}}`)
-- [ ] I will call Tonka Time Rentals if I am unsure about safe operation or troubleshooting. (`{{will_call_if_unsure}}`)
+- [`{{received_quick_start_guide}}`] I received or had access to the quick start guide.
+- [`{{understands_basic_controls}}`] I understand the basic controls well enough to operate safely or will not operate.
+- [`{{knows_emergency_shutdown}}`] I know how to perform an emergency shutdown and lower the boom/bucket safely.
+- [`{{understands_tip_risk}}`] I understand rollover, tip-over, slope, overhead, and blind-spot risks.
+- [`{{will_watch_tutorial_videos}}`] I will watch the required tutorial videos before operating.
+- [`{{will_call_if_unsure}}`] I will call Tonka Time Rentals if I am unsure about safe operation or troubleshooting.
 
 **Tutorial video acknowledgement ID / version:** `{{tutorial_video_version}}`  
 **Completion status:** `{{tutorial_completion_status}}`
@@ -241,8 +241,8 @@ Tonka Time Rentals may estimate damage after return and may adjust charges after
 ## 17. Optional Limited Damage Waiver
 
 **Selected waiver option:** `{{damage_waiver_choice}}`  
-[ ] Accept `{{damage_waiver_accept}}`  
-[ ] Decline `{{damage_waiver_decline}}`
+[`{{damage_waiver_accept}}`] Accept  
+[`{{damage_waiver_decline}}`] Decline
 
 If accepted and paid before the rental begins, the Limited Damage Waiver is a contractual waiver of certain direct accidental equipment-damage charges only, subject to the deductible, exclusions, and conditions stated in this Agreement and checkout. It is not insurance and does not provide liability coverage for Customer.
 
@@ -251,7 +251,7 @@ If accepted and paid before the rental begins, the Limited Damage Waiver is a co
 
 The Limited Damage Waiver does not cover theft, disappearance, failure to return, rollover, submerged equipment, water damage, fire, intentional damage, vandalism, misuse, negligence, recklessness, prohibited use, unauthorized operators, transport damage caused by Customer, improper fuel/fluids, low fluids, overheating, utility strikes, third-party property damage, bodily injury, lost income, late return, cleaning, fuel, towing, recovery, environmental cleanup, fines, penalties, or damage not promptly reported.
 
-- [ ] I understand the Limited Damage Waiver is not insurance and does not cover theft, rollover, submerged equipment, utility strikes, misuse, unauthorized operators, prohibited uses, transport damage, or third-party property damage. (`{{damage_waiver_acknowledged}}`)
+- [`{{damage_waiver_acknowledged}}`] I understand the Limited Damage Waiver is not insurance and does not cover theft, rollover, submerged equipment, utility strikes, misuse, unauthorized operators, prohibited uses, transport damage, or third-party property damage.
 
 Customer initials - damage waiver limits: __________
 
