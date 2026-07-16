@@ -569,7 +569,9 @@ function ReservationFlow() {
   const [signNowLoading, setSignNowLoading] = useState(false);
   const [signNowMessage, setSignNowMessage] = useState("");
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
-  const reservationIdFromUrl = searchParams.get("reservation") ?? draft.publicId;
+  const reservationQueryParam = searchParams.get("reservation");
+  const checkoutSessionId = searchParams.get("session_id");
+  const reservationIdFromUrl = reservationQueryParam ?? draft.publicId;
   const normalizedReservationId = reservationIdFromUrl ?? null;
   const previousReservationIdRef = useRef<string | null>(null);
 
@@ -594,11 +596,13 @@ function ReservationFlow() {
   }, [normalizedReservationId]);
 
   useEffect(() => {
-    if (searchParams.get("reservation") || !draft.publicId) {
+    if (reservationQueryParam || !draft.publicId) {
       return;
     }
 
-    void requestJson<ReservationSummary>(`/api/reservations/${draft.publicId}`)
+    void requestJson<ReservationSummary>(`/api/reservations/${draft.publicId}`, {
+      cache: "no-store",
+    })
       .then((summary) => {
         const normalized = normalizeReservationSummary(summary);
         const shouldStartFresh =
@@ -625,10 +629,10 @@ function ReservationFlow() {
       .catch(() => {
         // Leave the saved draft untouched if the summary lookup fails.
       });
-  }, [draft.publicId, searchParams]);
+  }, [draft.publicId, reservationQueryParam]);
 
   useEffect(() => {
-    if (location.pathname === "/reserve/payment" && reservationIdFromUrl && !searchParams.get("session_id")) {
+    if (location.pathname === "/reserve/payment" && reservationIdFromUrl && !checkoutSessionId) {
       void createCheckoutSession();
     }
     if ((location.pathname === "/reserve/sign" || location.pathname === "/reserve/confirmation") && reservationIdFromUrl) {
@@ -637,14 +641,13 @@ function ReservationFlow() {
     if (location.pathname === "/reserve/sign" && reservationIdFromUrl) {
       void ensureSignNowSigningSession(reservationIdFromUrl);
     }
-  }, [location.pathname, reservationIdFromUrl, searchParams]);
+  }, [location.pathname, reservationIdFromUrl, checkoutSessionId]);
 
   useEffect(() => {
-    const sessionId = searchParams.get("session_id");
-    if (location.pathname === "/reserve/payment" && sessionId) {
-      void loadCheckoutSessionStatus(sessionId);
+    if (location.pathname === "/reserve/payment" && checkoutSessionId) {
+      void loadCheckoutSessionStatus(checkoutSessionId);
     }
-  }, [location.pathname, searchParams]);
+  }, [location.pathname, checkoutSessionId]);
 
   useEffect(() => {
     if (location.pathname === "/reserve/date") {
@@ -835,7 +838,9 @@ function ReservationFlow() {
 
   async function loadReservationSummary(publicId: string) {
     try {
-      const data = normalizeReservationSummary(await requestJson<ReservationSummary>(`/api/reservations/${publicId}`));
+      const data = normalizeReservationSummary(await requestJson<ReservationSummary>(`/api/reservations/${publicId}`, {
+        cache: "no-store",
+      }));
       setReservationSummary(data);
     } catch {
       // Keep existing UI state if the summary endpoint is temporarily unavailable.
@@ -849,7 +854,9 @@ function ReservationFlow() {
 
     try {
       setSignNowLoading(true);
-      const currentStatus = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(publicId)}`);
+      const currentStatus = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(publicId)}`, {
+        cache: "no-store",
+      });
 
       if (currentStatus.status === "COMPLETED") {
         setSignNowMode(currentStatus.mode);
@@ -914,7 +921,9 @@ function ReservationFlow() {
     }
 
     const intervalId = window.setInterval(() => {
-      void requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(reservationIdFromUrl)}`)
+      void requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(reservationIdFromUrl)}`, {
+        cache: "no-store",
+      })
         .then((status) => {
           setReservationSummary((current) => current ? {
             ...current,
@@ -1617,12 +1626,14 @@ function formatMondayLabel(endDate: string) {
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
   const storedAuth = getStoredAuthSession();
   const headers = new Headers(init?.headers);
+  const method = (init?.method ?? "GET").toUpperCase();
   if (storedAuth?.token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${storedAuth.token}`);
   }
 
   const response = await fetch(input, {
     ...init,
+    cache: init?.cache ?? (method === "GET" ? "no-store" : undefined),
     headers,
   });
   const text = await response.text();
