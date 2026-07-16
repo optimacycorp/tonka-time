@@ -7,12 +7,13 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY client/package.json client/package.json
 COPY server/package.json server/package.json
 RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
-  && npm install
+  && npm ci --no-audit
 
 COPY . .
 RUN npm run prisma:generate
@@ -28,12 +29,13 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 COPY package.json ./
+COPY package-lock.json ./
 COPY client/package.json client/package.json
 COPY server/package.json server/package.json
 RUN npm config set fetch-retries 5 \
   && npm config set fetch-retry-mintimeout 20000 \
   && npm config set fetch-retry-maxtimeout 120000 \
-  && npm install --omit=dev
+  && npm ci --omit=dev --no-audit
 
 COPY --from=builder /app/server/dist ./server/dist
 COPY --from=builder /app/server/scripts ./server/scripts
