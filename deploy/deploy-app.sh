@@ -62,10 +62,11 @@ wait_for_health() {
 
 verify_container_runtime() {
   log "Verifying app runtime inside container"
-  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" node -e "import('./dist/index.js').then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1); })"
-  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" test -f /app/docs/Tonka_Time_Weekend_Rental_Agreement_Template.docx
-  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" test -f /app/server/scripts/render_agreement_docx.py
-  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" python3 - <<'PY'
+  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" test -f /app/server/dist/index.js || return 1
+  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" test -f /app/docs/Tonka_Time_Weekend_Rental_Agreement_Template.docx || return 1
+  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" test -f /app/server/scripts/render_agreement_docx.py || return 1
+  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" node -e "import('./server/dist/index.js').then(() => process.exit(0)).catch((error) => { console.error(error); process.exit(1); })" || return 1
+  docker_cmd compose -f "${COMPOSE_FILE}" --env-file "${ENV_FILE}" exec -T "${APP_SERVICE}" python3 - <<'PY' || return 1
 import pypdf
 import reportlab
 print("python pdf deps ok")
