@@ -297,6 +297,103 @@ router.get("/signing-session-status", asyncRoute(async (req, res) => {
   });
 }));
 
+router.get("/debug-session", asyncRoute(async (req, res) => {
+  const parsed = z.object({
+    reservationPublicId: z.string().min(1),
+    refresh: z
+      .union([z.literal("1"), z.literal("true"), z.literal("0"), z.literal("false")])
+      .optional(),
+  }).safeParse(req.query);
+
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Missing reservationPublicId." });
+  }
+
+  const shouldRefresh = parsed.data.refresh === "1" || parsed.data.refresh === "true";
+  const reservation = shouldRefresh
+    ? await syncOpenSignReservationStatus(parsed.data.reservationPublicId)
+    : await prisma.reservation.findUnique({ where: { publicId: parsed.data.reservationPublicId } });
+
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  const flags = getLegacySigningFlags(reservation.internalFlags);
+  const normalizedEmbedUrl = normalizeOpenSignSignerUrl(
+    flags.embedUrl ?? flags.signingLink ?? null,
+    reservation.docusealSubmissionId ?? undefined,
+  );
+  const debugPayload = getLegacyFlagsObject(flags.debug);
+  const documentDebug = getLegacyFlagsObject(debugPayload.documentDebug);
+  const generatedAgreementDebug = getLegacyFlagsObject(debugPayload.generatedAgreement);
+
+  return res.json({
+    reservation: {
+      publicId: reservation.publicId,
+      status: reservation.status,
+      paymentStatus: reservation.paymentStatus,
+      signingStatus: reservation.docusealStatus,
+      submissionId: reservation.docusealSubmissionId ?? null,
+      signedDocumentUrl: reservation.signedDocumentUrl ?? null,
+      updatedAt: reservation.updatedAt,
+    },
+    opensign: {
+      configured: openSignConfigured(),
+      hasAdminSessionAuth: openSignHasAdminSessionAuth(),
+      publicUrl: env.OPENSIGN_PUBLIC_URL ?? null,
+      apiUrl: env.OPENSIGN_API_URL ?? null,
+      templateId: env.OPENSIGN_TEMPLATE_ID_WEEKEND_RENTAL ?? null,
+      tenantId: env.OPENSIGN_TENANT_ID ?? null,
+    },
+    storedFlags: {
+      provider: flags.provider ?? null,
+      embedUrl: flags.embedUrl ?? null,
+      signingLink: flags.signingLink ?? null,
+      normalizedEmbedUrl,
+      documentId: flags.documentId ?? null,
+      sessionId: flags.sessionId ?? null,
+      templateId: flags.templateId ?? null,
+      tenantId: flags.tenantId ?? null,
+      createdAt: flags.createdAt ?? null,
+    },
+    debug: {
+      selectedEmbedUrl:
+        typeof debugPayload.selectedEmbedUrl === "string" ? debugPayload.selectedEmbedUrl : null,
+      selectedSource:
+        typeof debugPayload.selectedSource === "string" ? debugPayload.selectedSource : null,
+      adapterVersion:
+        typeof debugPayload.adapterVersion === "string" ? debugPayload.adapterVersion : null,
+      candidateUrls:
+        Array.isArray(documentDebug.candidateUrls) ? documentDebug.candidateUrls : [],
+      signerSummaries:
+        Array.isArray(documentDebug.signerSummaries) ? documentDebug.signerSummaries : [],
+      placeholderBindingSummary:
+        Array.isArray(documentDebug.placeholderBindingSummary) ? documentDebug.placeholderBindingSummary : [],
+      topLevelKeys:
+        Array.isArray(documentDebug.topLevelKeys) ? documentDebug.topLevelKeys : [],
+      generatedAgreement: {
+        templateVersion:
+          typeof generatedAgreementDebug.templateVersion === "string" ? generatedAgreementDebug.templateVersion : null,
+        templateSha256:
+          typeof generatedAgreementDebug.templateSha256 === "string" ? generatedAgreementDebug.templateSha256 : null,
+        layoutVersion:
+          typeof generatedAgreementDebug.layoutVersion === "string" ? generatedAgreementDebug.layoutVersion : null,
+        pdfPageCount:
+          typeof generatedAgreementDebug.pdfPageCount === "number" ? generatedAgreementDebug.pdfPageCount : null,
+        sha256:
+          typeof generatedAgreementDebug.sha256 === "string" ? generatedAgreementDebug.sha256 : null,
+        url:
+          typeof generatedAgreementDebug.url === "string" ? generatedAgreementDebug.url : null,
+      },
+    },
+    troubleshooting: {
+      shouldRefresh,
+      safeNormalizedEmbedUrl: isSafeOpenSignUrl(normalizedEmbedUrl),
+      note: "Use refresh=true to resync the reservation from OpenSign before inspecting stored flags.",
+    },
+  });
+}));
+
 async function syncOpenSignReservationStatus(publicId: string) {
   const reservation = await prisma.reservation.findUnique({ where: { publicId } });
   if (!reservation) {
@@ -479,6 +576,11 @@ async function createLiveSigningSessionViaLegacyApi(reservation: OpenSignReserva
     throw new Error("OpenSign did not return a signer document link. The template may be missing signers, or the signer role may not match `Customer`.");
   }
   const safeEmbedUrl = embedUrl as string;
+  console.info("OpenSign selected embed URL", {
+    documentId,
+    safeEmbedUrl,
+    selectedSource: isSafeOpenSignUrl(absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug))) ? "signinglinks" : "getDocument",
+  });
 
   return {
     sessionId: documentId,
@@ -1035,16 +1137,6 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
     }),
   ]);
 
-  if (signerObjectId && env.OPENSIGN_PUBLIC_URL) {
-    try {
-      const preferred = new URL(env.OPENSIGN_PUBLIC_URL);
-      preferred.pathname = `/load/recipientSignPdf/${encodeURIComponent(documentId)}/${encodeURIComponent(signerObjectId)}`;
-      return preferred.toString();
-    } catch {
-      // fall through to other candidates
-    }
-  }
-
   const directCandidates = collectStringValues(payload).map((value: string) => absolutizeOpenSignUrl(value));
   const rankedCandidate = directCandidates.find((value: string | null) => {
     if (!value || !isSafeOpenSignUrl(value)) {
@@ -1064,6 +1156,16 @@ function extractOpenSignEmbedUrl(payload: unknown, documentId: string) {
 
   if (rankedCandidate) {
     return normalizeOpenSignSignerUrl(rankedCandidate, documentId, signerObjectId ?? undefined);
+  }
+
+  if (signerObjectId && env.OPENSIGN_PUBLIC_URL) {
+    try {
+      const preferred = new URL(env.OPENSIGN_PUBLIC_URL);
+      preferred.pathname = `/load/recipientSignPdf/${encodeURIComponent(documentId)}/${encodeURIComponent(signerObjectId)}`;
+      return preferred.toString();
+    } catch {
+      // fall through
+    }
   }
 
   return null;
