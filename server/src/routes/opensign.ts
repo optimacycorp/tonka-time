@@ -579,7 +579,7 @@ async function createLiveSigningSessionViaLegacyApi(reservation: OpenSignReserva
   console.info("OpenSign selected embed URL", {
     documentId,
     safeEmbedUrl,
-    selectedSource: isSafeOpenSignUrl(absolutizeOpenSignUrl(extractSigningLink(signingLinksDebug))) ? "signinglinks" : "getDocument",
+    selectedSource: "signinglinks",
   });
 
   return {
