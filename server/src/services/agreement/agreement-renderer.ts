@@ -87,6 +87,7 @@ export async function renderUnsignedAgreement(
   }
 
   await convertDocxToPdf(outputDocxPath, outputPdfPath);
+  await normalizePdfForOpenSign(outputPdfPath);
   const pdfPageCount = await countPdfPages(outputPdfPath);
   if (pdfPageCount <= 0) {
     throw new Error("Rendered agreement PDF did not contain any pages.");
@@ -270,6 +271,24 @@ async function countPdfPages(pdfPath: string) {
     throw new Error(`Could not determine PDF page count for ${pdfPath}`);
   }
   return parsed;
+}
+
+async function normalizePdfForOpenSign(pdfPath: string) {
+  if (env.AGREEMENT_NORMALIZE_PDF !== true) {
+    return;
+  }
+
+  const script = path.resolve(process.cwd(), "scripts", "normalize_pdf.py");
+  await access(script);
+
+  const normalizedPath = path.join(
+    path.dirname(pdfPath),
+    `${path.basename(pdfPath, ".pdf")}-normalized.pdf`,
+  );
+
+  await runCommand(resolvePythonCommand(), [script, pdfPath, normalizedPath]);
+  await access(normalizedPath);
+  await copyFile(normalizedPath, pdfPath);
 }
 
 async function unzipDocx(docxPath: string, outputDirectory: string) {

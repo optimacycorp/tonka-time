@@ -46,6 +46,10 @@ const envSchema = z.object({
   AGREEMENT_GENERATION_MODE: z.enum(["opensign_prefill", "server_pdf"]).default("server_pdf"),
   AGREEMENT_RENDER_TIMEOUT_MS: z.coerce.number().default(120000),
   AGREEMENT_PDF_CONVERTER: z.enum(["auto", "soffice", "word"]).default("auto"),
+  AGREEMENT_NORMALIZE_PDF: z
+    .string()
+    .optional()
+    .transform((value) => value == null ? true : value.toLowerCase() === "true"),
   AGREEMENT_OFFICE_BIN: z.string().optional(),
   AGREEMENT_REQUIRE_ANCHORS: z
     .string()
