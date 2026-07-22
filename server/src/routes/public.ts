@@ -9,11 +9,32 @@ const router = Router();
 const minimumMachineInventory = 2;
 const shortHoldMinutes = 3;
 const reservedStatuses = ["PAYMENT_RECEIVED", "AWAITING_SIGNATURE", "AWAITING_ADMIN_REVIEW", "CONFIRMED"] as const;
+const addressLookupUserAgent = "TonkaTimeRentals/0.1 (delivery-address-lookup)";
 const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next) => {
   Promise.resolve(handler(req, res, next)).catch(next);
 };
 
 router.use(optionalAuth);
+
+router.get("/address/suggest", asyncRoute(async (req, res) => {
+  const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (query.length < 4) {
+    return res.json({ suggestions: [] });
+  }
+
+  const suggestions = await fetchAddressCandidates(query, 5);
+  return res.json({ suggestions });
+}));
+
+router.get("/address/geocode", asyncRoute(async (req, res) => {
+  const query = typeof req.query.q === "string" ? req.query.q.trim() : "";
+  if (query.length < 4) {
+    return res.status(400).json({ error: "Missing address query." });
+  }
+
+  const [result] = await fetchAddressCandidates(query, 1);
+  return res.json({ result: result ?? null });
+}));
 
 router.get("/availability", asyncRoute(async (req, res) => {
   const parsed = availabilityQuerySchema.safeParse(req.query);
@@ -191,6 +212,80 @@ function nextFriday() {
     date.setUTCDate(date.getUTCDate() + 1);
   }
   return date.toISOString().slice(0, 10);
+}
+
+type AddressSuggestion = {
+  label: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lon: number;
+};
+
+async function fetchAddressCandidates(query: string, limit: number): Promise<AddressSuggestion[]> {
+  const url = new URL("https://nominatim.openstreetmap.org/search");
+  url.searchParams.set("format", "jsonv2");
+  url.searchParams.set("addressdetails", "1");
+  url.searchParams.set("countrycodes", "us");
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("q", query);
+
+  const response = await fetch(url.toString(), {
+    headers: {
+      Accept: "application/json",
+      "User-Agent": addressLookupUserAgent,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error(`Address lookup failed with HTTP ${response.status}.`);
+  }
+
+  const payload = await response.json() as Array<Record<string, unknown>>;
+  return payload
+    .map(toAddressSuggestion)
+    .filter((value): value is AddressSuggestion => value != null);
+}
+
+function toAddressSuggestion(entry: Record<string, unknown>): AddressSuggestion | null {
+  const address = entry.address;
+  if (!address || typeof address !== "object" || Array.isArray(address)) {
+    return null;
+  }
+
+  const parts = address as Record<string, unknown>;
+  const streetNumber = firstString(parts.house_number);
+  const road = firstString(parts.road);
+  const street = [streetNumber, road].filter(Boolean).join(" ").trim();
+  const city =
+    firstString(parts.city) ??
+    firstString(parts.town) ??
+    firstString(parts.village) ??
+    firstString(parts.hamlet);
+  const state = firstString(parts.state_code) ?? firstString(parts.state);
+  const zip = firstString(parts.postcode);
+  const lat = Number.parseFloat(String(entry.lat ?? ""));
+  const lon = Number.parseFloat(String(entry.lon ?? ""));
+
+  if (!street || !city || !state || !zip || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return null;
+  }
+
+  return {
+    label: `${street}, ${city}, ${state} ${zip}`,
+    street,
+    city,
+    state,
+    zip,
+    lat,
+    lon,
+  };
+}
+
+function firstString(value: unknown) {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export default router;

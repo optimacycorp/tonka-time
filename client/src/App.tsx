@@ -29,13 +29,35 @@ type ReservationDraft = {
   checklist: Record<string, boolean>;
   tutorialAcknowledgement: Record<string, boolean>;
   waiverAcknowledged: boolean;
+  jobsiteLat?: number;
+  jobsiteLon?: number;
 };
 
 type ReservationSummary = {
+  id?: string;
   publicId?: string;
+  firstName?: string;
+  lastName?: string;
   email?: string;
+  phone?: string;
   weekendStartDate?: string;
   weekendEndDate?: string;
+  workDescription?: string;
+  jobsiteStreet?: string;
+  jobsiteCity?: string;
+  jobsiteState?: string;
+  jobsiteZip?: string;
+  gateAccessNotes?: string;
+  surfaceAccessNotes?: string;
+  isPropertyOwner?: boolean;
+  ownerPermission?: boolean;
+  colorado811Ticket?: string | null;
+  damageWaiverChoice?: "ACCEPTED" | "DECLINED";
+  checklistJson?: {
+    checklist?: Record<string, boolean>;
+    tutorialAcknowledgement?: Record<string, boolean>;
+    waiverAcknowledged?: boolean;
+  } | null;
   deliveryZone?: string;
   deliveryFeeCents?: number;
   rentalSubtotalCents?: number;
@@ -133,6 +155,16 @@ type NotificationItem = {
   createdAt: string;
 };
 
+type AddressSuggestion = {
+  label: string;
+  street: string;
+  city: string;
+  state: string;
+  zip: string;
+  lat: number;
+  lon: number;
+};
+
 const heroGraphic = "/images/tonka-hero-landscape.png";
 const promoPoster = "/images/tonka-promo-poster.png";
 const draftStorageKey = "tonka-time-reservation-draft";
@@ -152,7 +184,7 @@ const serviceCities = [
 const faqs = [
   ["How does the weekend rental work?", "We deliver Friday, provide a quick orientation, and pick up Monday."],
   ["Do I need an 811 ticket before digging?", "Yes. Colorado 811 and private utility verification are part of the rental checklist."],
-  ["Can I use the excavator on steep slopes?", "No. The MVP site explicitly warns against steep slopes, unstable ground, or public ROW work without permits."],
+  ["Can I use the excavator on steep slopes?", "No. Avoid steep slopes, unstable ground, or public right-of-way work without permits."],
   ["Can I move the excavator to another property or haul it on my own trailer?", "No. The machine is approved only for the listed jobsite, geofence monitoring may be used, and customer transport or relocation requires prior written approval from Tonka Time Rentals."],
 ];
 
@@ -199,6 +231,48 @@ const tutorialKeys = [
   "willCallIfUnsure",
 ];
 
+const checklistSections = [
+  {
+    title: "Property and boundaries",
+    keys: [
+      "knowsBoundaries",
+      "understandsFenceNotBoundary",
+      "hasOwnerPermission",
+      "notDiggingNeighborProperty",
+      "notDiggingPublicROWWithoutPermit",
+    ],
+  },
+  {
+    title: "Utilities and locates",
+    keys: [
+      "submitted811OrWillBeforeDigging",
+      "willWaitForLocateWindow",
+      "understandsPrivateUtilities",
+      "willAvoidUtilityToleranceZone",
+    ],
+  },
+  {
+    title: "Site safety",
+    keys: [
+      "willNotUndermineStructures",
+      "willKeepPeoplePetsAway",
+      "willStopIfUnsafe",
+    ],
+  },
+  {
+    title: "Jobsite controls",
+    keys: [
+      "understandsEquipmentMayBeTracked",
+      "consentsToLocationMonitoring",
+      "willUseOnlyAtApprovedJobsite",
+      "willNotMoveWithoutApproval",
+      "willNotTransportWithoutApproval",
+      "willNotTamperWithTrackingDevice",
+      "understandsGeofenceBreachConsequences",
+    ],
+  },
+] as const;
+
 const projectCategories = [
   "Drainage",
   "Trenching",
@@ -236,6 +310,8 @@ const defaultDraft: ReservationDraft = {
   checklist: Object.fromEntries(requiredChecklistKeys.map((key) => [key, false])),
   tutorialAcknowledgement: Object.fromEntries(tutorialKeys.map((key) => [key, false])),
   waiverAcknowledged: false,
+  jobsiteLat: undefined,
+  jobsiteLon: undefined,
 };
 
 function currency(cents: number) {
@@ -376,7 +452,7 @@ function SimplePage({
 
 function WeekendRentalsPage() {
   return (
-    <SimplePage title="Weekend Mini Excavator Rentals" intro="Tonka Time Rentals is built around one clear MVP package: a Friday delivery and Monday pickup for homeowners tackling practical digging projects.">
+    <SimplePage title="Weekend Mini Excavator Rentals" intro="Friday delivery, Monday pickup, and a homeowner-friendly rental flow designed for practical digging projects.">
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <div className="overflow-hidden rounded-[1.75rem] border border-black/5 bg-white shadow-card">
           <img src={promoPoster} alt="Tonka Time Rentals branded weekend mini excavator poster" className="h-full w-full object-cover" />
@@ -419,7 +495,7 @@ function WeekendRentalsPage() {
 
 function ServiceAreaPage() {
   return (
-    <SimplePage title="Service Area" intro="The MVP classifies jobs as core, extended, or manual review based on city and ZIP so homeowners get a fast answer before checkout.">
+    <SimplePage title="Service Area" intro="Jobs are classified as core, extended, or manual review based on the address so you get a clear delivery answer before checkout.">
       <div className="grid gap-4 md:grid-cols-3">
         {serviceCities.map((city) => (
           <div key={city} className="rounded-2xl border border-black/5 bg-white px-5 py-4 shadow-card">
@@ -576,17 +652,30 @@ function ReservationFlow() {
   const [agreementPreviewUrl, setAgreementPreviewUrl] = useState("");
   const [signNowLoading, setSignNowLoading] = useState(false);
   const [signNowMessage, setSignNowMessage] = useState("");
+  const [addressQuery, setAddressQuery] = useState("");
+  const [addressSuggestions, setAddressSuggestions] = useState<AddressSuggestion[]>([]);
+  const [addressLookupLoading, setAddressLookupLoading] = useState(false);
+  const [addressLookupError, setAddressLookupError] = useState("");
   const [signatureSubmitting, setSignatureSubmitting] = useState(false);
   const [signatureHasInk, setSignatureHasInk] = useState(false);
   const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const signatureDrawingRef = useRef(false);
   const signatureLastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const addressLookupAbortRef = useRef<AbortController | null>(null);
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
   const reservationQueryParam = searchParams.get("reservation");
   const checkoutSessionId = searchParams.get("session_id");
   const reservationIdFromUrl = reservationQueryParam ?? draft.publicId;
   const normalizedReservationId = reservationIdFromUrl ?? null;
   const previousReservationIdRef = useRef<string | null>(null);
+  const reservationLocked = Boolean(
+    reservationSummary && (
+      reservationSummary.status === "CONFIRMED" ||
+      reservationSummary.status === "CANCELLED" ||
+      reservationSummary.paymentStatus === "PAID" ||
+      reservationSummary.paymentStatus === "REFUNDED"
+    ),
+  );
 
   useEffect(() => {
     localStorage.setItem(draftStorageKey, JSON.stringify(draft));
@@ -606,6 +695,9 @@ function ReservationFlow() {
     setAgreementPreviewUrl("");
     setSignNowMessage("");
     setSignatureHasInk(false);
+    setAddressQuery("");
+    setAddressSuggestions([]);
+    setAddressLookupError("");
   }, [normalizedReservationId]);
 
   useEffect(() => {
@@ -618,25 +710,8 @@ function ReservationFlow() {
     })
       .then((summary) => {
         const normalized = normalizeReservationSummary(summary);
-        const shouldStartFresh =
-          normalized.status === "CONFIRMED" ||
-          normalized.status === "CANCELLED" ||
-          normalized.paymentStatus === "PAID" ||
-          normalized.paymentStatus === "REFUNDED" ||
-          normalized.signingStatus === "COMPLETED";
-
-        if (!shouldStartFresh) {
-          return;
-        }
-
-        setDraft((current) => ({ ...current, publicId: undefined }));
-        setReservationSummary(null);
-        setCheckoutClientSecret("");
-        setCheckoutPublishableKey("");
-        setCheckoutMode("");
-        setPaymentStatusMessage("");
-        setAgreementPreviewUrl("");
-        setSignNowMessage("");
+        setReservationSummary(normalized);
+        setDraft((current) => hydrateDraftFromReservation(current, normalized));
       })
       .catch(() => {
         // Leave the saved draft untouched if the summary lookup fails.
@@ -654,6 +729,68 @@ function ReservationFlow() {
       void loadSimpleSigningStatus(reservationIdFromUrl);
     }
   }, [location.pathname, reservationIdFromUrl, checkoutSessionId]);
+
+  useEffect(() => {
+    if (location.pathname !== "/reserve/delivery" || reservationLocked) {
+      return;
+    }
+
+    const query = addressQuery.trim();
+    if (query.length < 4) {
+      setAddressSuggestions([]);
+      setAddressLookupLoading(false);
+      setAddressLookupError("");
+      return;
+    }
+
+    addressLookupAbortRef.current?.abort();
+    const controller = new AbortController();
+    addressLookupAbortRef.current = controller;
+    setAddressLookupLoading(true);
+    setAddressLookupError("");
+
+    const timeoutId = window.setTimeout(() => {
+      void requestJson<{ suggestions: AddressSuggestion[] }>(`/api/address/suggest?q=${encodeURIComponent(query)}`, {
+        signal: controller.signal,
+      })
+        .then((result) => {
+          setAddressSuggestions(result.suggestions);
+        })
+        .catch((error) => {
+          if (controller.signal.aborted) {
+            return;
+          }
+          setAddressLookupError(error instanceof Error ? error.message : "Could not load address suggestions.");
+        })
+        .finally(() => {
+          if (!controller.signal.aborted) {
+            setAddressLookupLoading(false);
+          }
+        });
+    }, 300);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timeoutId);
+    };
+  }, [addressQuery, location.pathname, reservationLocked]);
+
+  useEffect(() => {
+    if (location.pathname !== "/reserve/delivery") {
+      return;
+    }
+
+    if (draft.jobsiteLat && draft.jobsiteLon) {
+      return;
+    }
+
+    const parts = [draft.jobsiteStreet, draft.jobsiteCity, draft.jobsiteState, draft.jobsiteZip].filter(Boolean);
+    if (parts.length < 4) {
+      return;
+    }
+
+    void geocodeDraftAddress(parts.join(", "));
+  }, [draft.jobsiteStreet, draft.jobsiteCity, draft.jobsiteState, draft.jobsiteZip, draft.jobsiteLat, draft.jobsiteLon, location.pathname]);
 
   useEffect(() => {
     if (location.pathname === "/reserve/payment" && checkoutSessionId) {
@@ -854,9 +991,42 @@ function ReservationFlow() {
         cache: "no-store",
       }));
       setReservationSummary(data);
+      setDraft((current) => hydrateDraftFromReservation(current, data));
     } catch {
       // Keep existing UI state if the summary endpoint is temporarily unavailable.
     }
+  }
+
+  async function geocodeDraftAddress(query: string) {
+    try {
+      const data = await requestJson<{ result: AddressSuggestion | null }>(`/api/address/geocode?q=${encodeURIComponent(query)}`);
+      if (!data.result) {
+        return;
+      }
+
+      setDraft((current) => ({
+        ...current,
+        jobsiteLat: data.result?.lat,
+        jobsiteLon: data.result?.lon,
+      }));
+    } catch {
+      // Leave the map empty if geocoding is unavailable.
+    }
+  }
+
+  function applyAddressSuggestion(suggestion: AddressSuggestion) {
+    setAddressQuery(suggestion.label);
+    setAddressSuggestions([]);
+    setAddressLookupError("");
+    setDraft((current) => ({
+      ...current,
+      jobsiteStreet: suggestion.street,
+      jobsiteCity: suggestion.city,
+      jobsiteState: suggestion.state,
+      jobsiteZip: suggestion.zip,
+      jobsiteLat: suggestion.lat,
+      jobsiteLon: suggestion.lon,
+    }));
   }
 
   async function loadSimpleSigningStatus(publicId: string) {
@@ -1032,6 +1202,10 @@ function ReservationFlow() {
   const selectedFridayAvailability = fridayOptions.find((option) => option.weekendStartDate === draft.weekendStartDate) ?? availability;
 
   function validateCurrentStep() {
+    if (reservationLocked) {
+      return true;
+    }
+
     switch (location.pathname) {
       case "/reserve/package":
         return true;
@@ -1121,12 +1295,17 @@ function ReservationFlow() {
     setAgreementPreviewUrl("");
     setSignNowMessage("");
     setSignatureHasInk(false);
+    setAddressQuery("");
+    setAddressSuggestions([]);
+    setAddressLookupError("");
     navigate("/reserve/package");
   }
 
   const derivedWeekendEnd = draft.weekendStartDate ? getWeekendEnd(draft.weekendStartDate) : "";
+  const deliveryAddress = [draft.jobsiteStreet, `${draft.jobsiteCity}, ${draft.jobsiteState} ${draft.jobsiteZip}`].filter(Boolean);
+  const mapEmbedUrl = buildMapEmbedUrl(draft.jobsiteLat, draft.jobsiteLon);
   return (
-    <SimplePage title="Reserve a Weekend" intro="This MVP flow now walks you through the actual reservation steps: package, Friday availability, delivery details, homeowner checklist, waiver election, review, payment handoff, and post-payment next steps.">
+    <SimplePage title="Reserve a Weekend" intro="Choose your weekend, confirm the delivery address, review the safety items, sign the agreement, and complete payment in one place.">
       <div className="grid gap-8 lg:grid-cols-[0.32fr_0.68fr]">
         <aside className="rounded-[1.75rem] bg-slate-950 p-6 text-white shadow-card">
           <p className="text-xs uppercase tracking-[0.22em] text-white/55">Reservation progress</p>
@@ -1154,6 +1333,11 @@ function ReservationFlow() {
             <p className="mt-2">Reservation ID: {draft.publicId ?? "Not created yet"}</p>
             <p className="mt-1">Weekend: {draft.weekendStartDate || "Not selected"}</p>
             <p className="mt-1">Zone: {draft.deliveryZone ?? "Pending address check"}</p>
+            {reservationLocked && (
+              <button type="button" onClick={resetDraft} className="mt-4 rounded-full bg-white px-4 py-2 font-semibold text-slate-950">
+                Start a new reservation
+              </button>
+            )}
           </div>
         </aside>
 
@@ -1163,7 +1347,7 @@ function ReservationFlow() {
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 1</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Weekend Mini Excavator Rental</h2>
               <p className="mt-4 max-w-3xl text-slate-700">
-                One clear MVP package: Friday delivery, Monday pickup, local planning support, and a homeowner-first workflow that keeps the weekend booking simple.
+                Reserve the weekend package with Friday delivery, Monday pickup, and the support you need to get the machine on site and ready to work.
               </p>
               <div className="mt-6 grid gap-4 md:grid-cols-2">
                 {[
@@ -1238,47 +1422,113 @@ function ReservationFlow() {
               <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-4 text-sm text-amber-950">
                 The excavator is approved only for the jobsite address entered below. Customer transport, relocation to another property, or hauling on your own trailer is prohibited unless Tonka Time Rentals gives prior written approval.
               </p>
-              <div className="mt-6 grid gap-5 md:grid-cols-2">
-                {[
-                  ["First name", "firstName"],
-                  ["Last name", "lastName"],
-                  ["Email", "email"],
-                  ["Phone", "phone"],
-                  ["Street address", "jobsiteStreet"],
-                  ["City", "jobsiteCity"],
-                  ["State", "jobsiteState"],
-                  ["ZIP", "jobsiteZip"],
-                ].map(([label, key]) => (
-                  <label key={key} className="block">
-                    <span className="text-sm font-semibold text-slate-700">{label}</span>
-                    <input
-                      className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3"
-                      value={draft[key as keyof ReservationDraft] as string}
-                      onChange={(event) => updateField(key as keyof ReservationDraft, event.target.value as never)}
-                    />
-                  </label>
-                ))}
-              </div>
-              <div className="mt-5 grid gap-5">
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700">Gate and access notes</span>
-                  <textarea className="mt-2 min-h-28 w-full rounded-2xl border border-slate-200 px-4 py-3" value={draft.gateAccessNotes} onChange={(event) => updateField("gateAccessNotes", event.target.value)} />
-                </label>
-                <label className="block">
-                  <span className="text-sm font-semibold text-slate-700">Surface and access notes</span>
-                  <textarea className="mt-2 min-h-28 w-full rounded-2xl border border-slate-200 px-4 py-3" value={draft.surfaceAccessNotes} onChange={(event) => updateField("surfaceAccessNotes", event.target.value)} />
-                </label>
-              </div>
-              <div className="mt-5 grid gap-3 md:grid-cols-2">
-                <label className="flex items-center gap-3 rounded-2xl bg-sky px-4 py-4">
-                  <input type="checkbox" checked={draft.isPropertyOwner} onChange={(event) => updateField("isPropertyOwner", event.target.checked)} />
-                  <span className="text-sm font-medium text-slate-700">I am the property owner</span>
-                </label>
-                <label className="flex items-center gap-3 rounded-2xl bg-sky px-4 py-4">
-                  <input type="checkbox" checked={draft.ownerPermission} onChange={(event) => updateField("ownerPermission", event.target.checked)} />
-                  <span className="text-sm font-medium text-slate-700">I have permission to dig at this property</span>
-                </label>
-              </div>
+              {reservationLocked ? (
+                <div className="mt-6 grid gap-5 lg:grid-cols-[0.52fr_0.48fr]">
+                  <div className="grid gap-5">
+                    <SummaryCard title="Contact" lines={[`${draft.firstName} ${draft.lastName}`.trim(), draft.email, draft.phone]} />
+                    <SummaryCard title="Delivery address" lines={[...deliveryAddress, `Zone: ${draft.deliveryZone ?? "Pending"}`]} />
+                    <SummaryCard title="Access notes" lines={[draft.gateAccessNotes || "No gate/access notes provided", draft.surfaceAccessNotes || "No surface/access notes provided"]} />
+                  </div>
+                  <div className="rounded-[1.5rem] border border-black/5 bg-sky p-4">
+                    {mapEmbedUrl ? (
+                      <iframe title="Jobsite map" src={mapEmbedUrl} className="min-h-[420px] w-full rounded-[1rem] border-0" />
+                    ) : (
+                      <div className="rounded-[1rem] bg-white p-6 text-slate-600 shadow-card">
+                        The map preview will appear once the address is geocoded.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <div className="mt-6 rounded-[1.5rem] bg-sky p-5">
+                    <label className="block">
+                      <span className="text-sm font-semibold text-slate-700">Search the jobsite address</span>
+                      <input
+                        className="mt-2 w-full rounded-2xl border border-slate-200 bg-white px-4 py-3"
+                        placeholder="Start typing the delivery address"
+                        value={addressQuery}
+                        onChange={(event) => setAddressQuery(event.target.value)}
+                      />
+                    </label>
+                    {addressLookupLoading && <p className="mt-3 text-sm text-slate-600">Looking up addresses...</p>}
+                    {addressLookupError && <p className="mt-3 text-sm text-rose-700">{addressLookupError}</p>}
+                    {addressSuggestions.length > 0 && (
+                      <div className="mt-3 rounded-2xl bg-white p-2 shadow-card">
+                        {addressSuggestions.map((suggestion) => (
+                          <button
+                            key={`${suggestion.label}-${suggestion.lat}-${suggestion.lon}`}
+                            type="button"
+                            onClick={() => applyAddressSuggestion(suggestion)}
+                            className="flex w-full rounded-xl px-3 py-3 text-left text-sm text-slate-700 transition hover:bg-sky"
+                          >
+                            {suggestion.label}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-6 grid gap-5 lg:grid-cols-[0.56fr_0.44fr]">
+                    <div className="grid gap-5">
+                      <div className="grid gap-5 md:grid-cols-2">
+                        {[
+                          ["First name", "firstName"],
+                          ["Last name", "lastName"],
+                          ["Email", "email"],
+                          ["Phone", "phone"],
+                          ["Street address", "jobsiteStreet"],
+                          ["City", "jobsiteCity"],
+                          ["State", "jobsiteState"],
+                          ["ZIP", "jobsiteZip"],
+                        ].map(([label, key]) => (
+                          <label key={key} className="block">
+                            <span className="text-sm font-semibold text-slate-700">{label}</span>
+                            <input
+                              className="mt-2 w-full rounded-2xl border border-slate-200 px-4 py-3"
+                              value={draft[key as keyof ReservationDraft] as string}
+                              onChange={(event) => updateField(key as keyof ReservationDraft, event.target.value as never)}
+                              onBlur={() => {
+                                if (key === "jobsiteZip" && draft.jobsiteStreet && draft.jobsiteCity && draft.jobsiteState && draft.jobsiteZip) {
+                                  void geocodeDraftAddress(`${draft.jobsiteStreet}, ${draft.jobsiteCity}, ${draft.jobsiteState} ${draft.jobsiteZip}`);
+                                }
+                              }}
+                            />
+                          </label>
+                        ))}
+                      </div>
+                      <div className="grid gap-5">
+                        <label className="block">
+                          <span className="text-sm font-semibold text-slate-700">Gate and access notes</span>
+                          <textarea className="mt-2 min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3" value={draft.gateAccessNotes} onChange={(event) => updateField("gateAccessNotes", event.target.value)} />
+                        </label>
+                        <label className="block">
+                          <span className="text-sm font-semibold text-slate-700">Surface and access notes</span>
+                          <textarea className="mt-2 min-h-24 w-full rounded-2xl border border-slate-200 px-4 py-3" value={draft.surfaceAccessNotes} onChange={(event) => updateField("surfaceAccessNotes", event.target.value)} />
+                        </label>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2">
+                        <label className="flex items-center gap-3 rounded-2xl bg-sky px-4 py-4">
+                          <input type="checkbox" checked={draft.isPropertyOwner} onChange={(event) => updateField("isPropertyOwner", event.target.checked)} />
+                          <span className="text-sm font-medium text-slate-700">I am the property owner</span>
+                        </label>
+                        <label className="flex items-center gap-3 rounded-2xl bg-sky px-4 py-4">
+                          <input type="checkbox" checked={draft.ownerPermission} onChange={(event) => updateField("ownerPermission", event.target.checked)} />
+                          <span className="text-sm font-medium text-slate-700">I have permission to dig at this property</span>
+                        </label>
+                      </div>
+                    </div>
+                    <div className="rounded-[1.5rem] border border-black/5 bg-sky p-4">
+                      {mapEmbedUrl ? (
+                        <iframe title="Jobsite map" src={mapEmbedUrl} className="min-h-[420px] w-full rounded-[1rem] border-0" />
+                      ) : (
+                        <div className="rounded-[1rem] bg-white p-6 text-slate-600 shadow-card">
+                          Choose a suggested address or finish the address fields to preview the dropoff location map.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -1287,12 +1537,24 @@ function ReservationFlow() {
               <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
                 <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 4</p>
                 <h2 className="mt-2 font-display text-3xl text-soil">Homeowner dig and location-control checklist</h2>
-                <div className="mt-5 grid gap-3">
-                  {requiredChecklistKeys.map((key) => (
-                    <label key={key} className="flex items-start gap-3 rounded-2xl bg-sky px-4 py-4">
-                      <input type="checkbox" className="mt-1" checked={draft.checklist[key]} onChange={(event) => updateChecklistValue("checklist", key, event.target.checked)} />
-                      <span className="text-sm text-slate-700">{checklistLabel(key)}</span>
-                    </label>
+                <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                  {checklistSections.map((section) => (
+                    <div key={section.title} className="rounded-[1.5rem] border border-black/5 bg-sky p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <h3 className="font-display text-xl text-soil">{section.title}</h3>
+                        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+                          {section.keys.filter((key) => draft.checklist[key]).length}/{section.keys.length}
+                        </span>
+                      </div>
+                      <div className="mt-4 grid gap-2">
+                        {section.keys.map((key) => (
+                          <label key={key} className="flex items-start gap-3 rounded-xl bg-white px-3 py-3">
+                            <input type="checkbox" className="mt-1" checked={draft.checklist[key]} onChange={(event) => updateChecklistValue("checklist", key, event.target.checked)} />
+                            <span className="text-sm text-slate-700">{checklistLabel(key)}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>
@@ -1321,7 +1583,7 @@ function ReservationFlow() {
               </div>
               <div className="rounded-[1.75rem] bg-white p-6 shadow-card">
                 <h3 className="font-display text-2xl text-soil">Tutorial acknowledgement</h3>
-                <div className="mt-5 grid gap-3">
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
                   {tutorialKeys.map((key) => (
                     <label key={key} className="flex items-start gap-3 rounded-2xl bg-sky px-4 py-4">
                       <input type="checkbox" className="mt-1" checked={draft.tutorialAcknowledgement[key]} onChange={(event) => updateChecklistValue("tutorialAcknowledgement", key, event.target.checked)} />
@@ -1475,7 +1737,7 @@ function ReservationFlow() {
               <p className="text-sm uppercase tracking-[0.2em] text-slate-500">Step 7</p>
               <h2 className="mt-2 font-display text-3xl text-soil">Agreement signing</h2>
               <p className="mt-4 text-slate-700">
-                Review and sign the rental agreement without leaving the reservation flow. The signing step is now aligned to self-hosted OpenSign so the agreement workflow stays on your RackNerd stack.
+                Review the rental agreement, add your signature, and confirm the final acknowledgment before continuing to payment.
               </p>
               <div className="mt-6 rounded-2xl bg-field p-5 text-white">
                 <div className="grid gap-4 lg:grid-cols-[1fr_auto] lg:items-start">
@@ -1702,6 +1964,68 @@ function formatMondayLabel(endDate: string) {
     month: "short",
     day: "numeric",
   });
+}
+
+function buildMapEmbedUrl(lat?: number, lon?: number) {
+  if (typeof lat !== "number" || typeof lon !== "number") {
+    return "";
+  }
+
+  const delta = 0.01;
+  const bbox = [
+    (lon - delta).toFixed(6),
+    (lat - delta).toFixed(6),
+    (lon + delta).toFixed(6),
+    (lat + delta).toFixed(6),
+  ].join("%2C");
+  return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lon.toFixed(6)}`;
+}
+
+function hydrateDraftFromReservation(current: ReservationDraft, summary: ReservationSummary) {
+  const storedChecklist = summary.checklistJson?.checklist ?? {};
+  const storedTutorial = summary.checklistJson?.tutorialAcknowledgement ?? {};
+  const workDescription = summary.workDescription ?? current.workDescription ?? "";
+  const splitWorkDescription = workDescription.includes(":")
+    ? workDescription.split(/:\s*/, 2)
+    : ["", workDescription];
+  const plannedWorkCategory = splitWorkDescription[0] || current.plannedWorkCategory;
+  const plannedWorkDescription = splitWorkDescription[1] || splitWorkDescription[0] || current.plannedWorkDescription;
+
+  return {
+    ...current,
+    publicId: summary.publicId ?? current.publicId,
+    firstName: summary.firstName ?? current.firstName,
+    lastName: summary.lastName ?? current.lastName,
+    email: summary.email ?? current.email,
+    phone: summary.phone ?? current.phone,
+    weekendStartDate: summary.weekendStartDate ?? current.weekendStartDate,
+    jobsiteStreet: summary.jobsiteStreet ?? current.jobsiteStreet,
+    jobsiteCity: summary.jobsiteCity ?? current.jobsiteCity,
+    jobsiteState: summary.jobsiteState ?? current.jobsiteState,
+    jobsiteZip: summary.jobsiteZip ?? current.jobsiteZip,
+    gateAccessNotes: summary.gateAccessNotes ?? current.gateAccessNotes,
+    surfaceAccessNotes: summary.surfaceAccessNotes ?? current.surfaceAccessNotes,
+    workDescription,
+    isPropertyOwner: summary.isPropertyOwner ?? current.isPropertyOwner,
+    ownerPermission: summary.ownerPermission ?? current.ownerPermission,
+    deliveryZone: summary.deliveryZone ?? current.deliveryZone,
+    damageWaiverChoice: summary.damageWaiverChoice ?? current.damageWaiverChoice,
+    colorado811Ticket: summary.colorado811Ticket ?? current.colorado811Ticket,
+    plannedWorkCategory,
+    plannedWorkDescription,
+    checklistCompleted:
+      requiredChecklistKeys.every((key) => Boolean(storedChecklist[key])) &&
+      tutorialKeys.every((key) => Boolean(storedTutorial[key])),
+    checklist: {
+      ...current.checklist,
+      ...storedChecklist,
+    },
+    tutorialAcknowledgement: {
+      ...current.tutorialAcknowledgement,
+      ...storedTutorial,
+    },
+    waiverAcknowledged: summary.checklistJson?.waiverAcknowledged ?? current.waiverAcknowledged,
+  };
 }
 
 async function requestJson<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {

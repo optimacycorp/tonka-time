@@ -65,7 +65,7 @@ def draw_signature(pdf_canvas: canvas.Canvas, image: ImageReader, rect: dict, pa
     x = float(rect["x"])
     width = float(rect["width"])
     height = float(rect["height"])
-    bottom = page_height - float(rect["y"]) - height
+    bottom = float(rect["y"])
 
     image_width, image_height = image.getSize()
     scale = min(width / image_width, height / image_height)
@@ -88,7 +88,7 @@ def draw_signature(pdf_canvas: canvas.Canvas, image: ImageReader, rect: dict, pa
 def draw_date(pdf_canvas: canvas.Canvas, signed_date: str, rect: dict, page_height: float) -> None:
     x = float(rect["x"])
     height = float(rect["height"])
-    bottom = page_height - float(rect["y"]) - height
+    bottom = float(rect["y"])
     pdf_canvas.setFont("Helvetica", 11)
     pdf_canvas.drawString(x, bottom + max(2, height * 0.2), signed_date)
 
