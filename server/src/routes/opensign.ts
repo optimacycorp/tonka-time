@@ -1,6 +1,8 @@
 import { Router, type RequestHandler } from "express";
 import path from "node:path";
 import { createHmac } from "node:crypto";
+import { spawn } from "node:child_process";
+import { access, writeFile } from "node:fs/promises";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { env } from "../lib/config.js";
@@ -19,6 +21,11 @@ const asyncRoute = (handler: RequestHandler): RequestHandler => (req, res, next)
 };
 
 const createSigningSessionSchema = z.object({ reservationPublicId: z.string().min(1) });
+const simpleSigningStatusSchema = z.object({ reservationPublicId: z.string().min(1) });
+const simpleSignSchema = z.object({
+  reservationPublicId: z.string().min(1),
+  signatureDataUrl: z.string().min(32),
+});
 
 type OpenSignFlags = {
   provider?: string;
@@ -103,6 +110,85 @@ function toPrismaJson(value: unknown): Prisma.InputJsonValue | null {
 
   return JSON.parse(JSON.stringify(value)) as Prisma.InputJsonValue;
 }
+
+router.get("/simple-sign-status", asyncRoute(async (req, res) => {
+  const parsed = simpleSigningStatusSchema.safeParse(req.query);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Missing reservationPublicId." });
+  }
+
+  const reservation = await prisma.reservation.findUnique({ where: { publicId: parsed.data.reservationPublicId } });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  const generated = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
+  const previewDocumentUrl =
+    reservation.docusealStatus === "COMPLETED" && reservation.signedDocumentUrl
+      ? reservation.signedDocumentUrl
+      : buildGeneratedAgreementUrl(reservation.publicId, generated);
+
+  return res.json({
+    reservationPublicId: reservation.publicId,
+    status: reservation.docusealStatus,
+    previewDocumentUrl,
+    signedDocumentUrl: reservation.signedDocumentUrl ?? null,
+    message:
+      reservation.docusealStatus === "COMPLETED"
+        ? "Agreement completed. Review or download the signed document below."
+        : "Draw your signature below, then apply it to the agreement.",
+  });
+}));
+
+router.post("/simple-sign", asyncRoute(async (req, res) => {
+  const parsed = simpleSignSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: parsed.error.flatten() });
+  }
+
+  const reservation = await prisma.reservation.findUnique({ where: { publicId: parsed.data.reservationPublicId } });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  if (["CANCELLED", "EXPIRED"].includes(reservation.status)) {
+    return res.status(409).json({ error: "The agreement cannot be signed for a cancelled or expired reservation." });
+  }
+
+  const generated = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
+  const signedDocumentUrl = await generateSimpleSignedAgreement({
+    publicId: reservation.publicId,
+    signatureDataUrl: parsed.data.signatureDataUrl,
+    generatedAgreement: generated,
+  });
+
+  const updated = await prisma.reservation.update({
+    where: { publicId: reservation.publicId },
+    data: {
+      docusealStatus: "COMPLETED",
+      status: reservation.paymentStatus === "PAID" ? "CONFIRMED" : "PENDING_PAYMENT",
+      confirmedAt: reservation.paymentStatus === "PAID" ? reservation.confirmedAt ?? new Date() : reservation.confirmedAt,
+      signedDocumentUrl,
+      internalFlags: {
+        ...getLegacyFlagsObject(reservation.internalFlags),
+        opensign: {
+          ...getLegacySigningFlags(reservation.internalFlags),
+          provider: "simple-sign",
+          signedAt: new Date().toISOString(),
+        },
+      },
+    },
+  });
+
+  return res.json({
+    reservation: updated,
+    reservationPublicId: updated.publicId,
+    status: updated.docusealStatus,
+    previewDocumentUrl: signedDocumentUrl,
+    signedDocumentUrl,
+    message: "Agreement signed. Review the completed PDF below, then continue to payment.",
+  });
+}));
 
 router.post("/create-signing-session", asyncRoute(async (req, res) => {
   const parsed = createSigningSessionSchema.safeParse(req.body);
@@ -250,6 +336,26 @@ router.get("/generated-agreement/:publicId.pdf", asyncRoute(async (req, res) => 
   res.type("application/pdf");
   res.setHeader("Cache-Control", "no-store");
   res.sendFile(path.resolve(generated.outputPdfPath));
+}));
+
+router.get("/signed-agreement/:publicId.pdf", asyncRoute(async (req, res) => {
+  const publicId = String(req.params.publicId);
+  const token = typeof req.query.token === "string" ? req.query.token : "";
+  if (!token || !verifyGeneratedAgreementToken(publicId, token)) {
+    return res.status(403).json({ error: "Invalid agreement token." });
+  }
+
+  const reservation = await prisma.reservation.findUnique({ where: { publicId } });
+  if (!reservation) {
+    return res.status(404).json({ error: "Reservation not found" });
+  }
+
+  const generated = await renderUnsignedAgreement(reservation as ReservationAgreementSource);
+  const signedPdfPath = path.join(generated.outputDirectory, `${publicId}-signed.pdf`);
+  await access(signedPdfPath);
+  res.type("application/pdf");
+  res.setHeader("Cache-Control", "no-store");
+  res.sendFile(path.resolve(signedPdfPath));
 }));
 
 router.get("/signing-session-status", asyncRoute(async (req, res) => {
@@ -799,6 +905,13 @@ function buildGeneratedAgreementUrl(publicId: string, generated: GeneratedAgreem
   return base.toString();
 }
 
+function buildSignedAgreementUrl(publicId: string) {
+  const base = new URL(env.SITE_URL);
+  base.pathname = `/api/opensign/signed-agreement/${encodeURIComponent(publicId)}.pdf`;
+  base.searchParams.set("token", signGeneratedAgreementToken(publicId));
+  return base.toString();
+}
+
 function signGeneratedAgreementToken(publicId: string) {
   const secret = resolveGeneratedAgreementSecret();
   return createHmac("sha256", secret).update(publicId).digest("hex");
@@ -806,6 +919,81 @@ function signGeneratedAgreementToken(publicId: string) {
 
 function verifyGeneratedAgreementToken(publicId: string, token: string) {
   return token === signGeneratedAgreementToken(publicId);
+}
+
+async function generateSimpleSignedAgreement(options: {
+  publicId: string;
+  signatureDataUrl: string;
+  generatedAgreement: GeneratedAgreement;
+}) {
+  const signatureRect = options.generatedAgreement.widgetRects.find((rect) => rect.name === "customer_signature");
+  const dateRect = options.generatedAgreement.widgetRects.find((rect) => rect.name === "date_signed");
+
+  if (!signatureRect || !dateRect) {
+    throw new Error("Agreement template is missing the signature or date anchor.");
+  }
+
+  const payloadPath = path.join(options.generatedAgreement.outputDirectory, `${options.publicId}-sign-payload.json`);
+  const outputPdfPath = path.join(options.generatedAgreement.outputDirectory, `${options.publicId}-signed.pdf`);
+  const scriptPath = path.resolve(process.cwd(), "scripts", "render_signed_agreement.py");
+  const now = new Date();
+  const signedDateText = now.toLocaleDateString("en-US", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+
+  await writeFile(payloadPath, JSON.stringify({
+    sourcePdfPath: options.generatedAgreement.outputPdfPath,
+    outputPdfPath,
+    signatureRect,
+    dateRect,
+    signedDateText,
+    signatureDataUrl: options.signatureDataUrl,
+  }, null, 2), "utf8");
+
+  await access(scriptPath);
+  await runCommand(resolvePythonCommand(), [scriptPath, payloadPath]);
+  await access(outputPdfPath);
+  return buildSignedAgreementUrl(options.publicId);
+}
+
+function resolvePythonCommand() {
+  return process.platform === "win32" ? "python" : "python3";
+}
+
+async function runCommand(command: string, args: string[]) {
+  const output = await new Promise<string>((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+      cwd: process.cwd(),
+      env: process.env,
+      windowsHide: true,
+    });
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk.toString();
+    });
+
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk.toString();
+    });
+
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve(stdout.trim());
+        return;
+      }
+
+      reject(new Error(`Command failed (${command} ${args.join(" ")}): ${stderr || stdout || `exit code ${code}`}`));
+    });
+  });
+
+  return output;
 }
 
 function resolveGeneratedAgreementSecret() {

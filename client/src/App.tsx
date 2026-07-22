@@ -77,6 +77,15 @@ type OpenSignSigningResponse = {
   message?: string;
 };
 
+type SimpleSigningResponse = {
+  reservationPublicId?: string;
+  reservation?: ReservationSummary;
+  status?: string | null;
+  previewDocumentUrl?: string | null;
+  signedDocumentUrl?: string | null;
+  message?: string;
+};
+
 type AvailabilityResponse = {
   weekendStartDate: string;
   weekendEndDate: string;
@@ -564,11 +573,14 @@ function ReservationFlow() {
   const [checkoutMode, setCheckoutMode] = useState<"live" | "placeholder" | "fake" | "">("");
   const [paymentStatusMessage, setPaymentStatusMessage] = useState("");
   const [paymentLoading, setPaymentLoading] = useState(false);
-  const [signNowMode, setSignNowMode] = useState<"live" | "placeholder" | "">("");
-  const [signNowEmbedUrl, setSignNowEmbedUrl] = useState("");
+  const [agreementPreviewUrl, setAgreementPreviewUrl] = useState("");
   const [signNowLoading, setSignNowLoading] = useState(false);
   const [signNowMessage, setSignNowMessage] = useState("");
-  const signNowStatusPollInFlightRef = useRef(false);
+  const [signatureSubmitting, setSignatureSubmitting] = useState(false);
+  const [signatureHasInk, setSignatureHasInk] = useState(false);
+  const signatureCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const signatureDrawingRef = useRef(false);
+  const signatureLastPointRef = useRef<{ x: number; y: number } | null>(null);
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
   const reservationQueryParam = searchParams.get("reservation");
   const checkoutSessionId = searchParams.get("session_id");
@@ -591,9 +603,9 @@ function ReservationFlow() {
     setCheckoutPublishableKey("");
     setCheckoutMode("");
     setPaymentStatusMessage("");
-    setSignNowMode("");
-    setSignNowEmbedUrl("");
+    setAgreementPreviewUrl("");
     setSignNowMessage("");
+    setSignatureHasInk(false);
   }, [normalizedReservationId]);
 
   useEffect(() => {
@@ -623,8 +635,7 @@ function ReservationFlow() {
         setCheckoutPublishableKey("");
         setCheckoutMode("");
         setPaymentStatusMessage("");
-        setSignNowMode("");
-        setSignNowEmbedUrl("");
+        setAgreementPreviewUrl("");
         setSignNowMessage("");
       })
       .catch(() => {
@@ -640,7 +651,7 @@ function ReservationFlow() {
       void loadReservationSummary(reservationIdFromUrl);
     }
     if (location.pathname === "/reserve/sign" && reservationIdFromUrl) {
-      void ensureSignNowSigningSession(reservationIdFromUrl);
+      void loadSimpleSigningStatus(reservationIdFromUrl);
     }
   }, [location.pathname, reservationIdFromUrl, checkoutSessionId]);
 
@@ -848,143 +859,150 @@ function ReservationFlow() {
     }
   }
 
-  async function ensureSignNowSigningSession(publicId: string) {
-    if (signNowEmbedUrl || signNowMode === "placeholder" || reservationSummary?.signingStatus === "COMPLETED") {
-      return;
-    }
-
+  async function loadSimpleSigningStatus(publicId: string) {
     try {
       setSignNowLoading(true);
-      const currentStatus = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(publicId)}`, {
+      const currentStatus = await requestJson<SimpleSigningResponse>(`/api/opensign/simple-sign-status?reservationPublicId=${encodeURIComponent(publicId)}`, {
         cache: "no-store",
       });
-
-      if (currentStatus.status === "COMPLETED") {
-        setSignNowMode(currentStatus.mode);
-        setSignNowMessage("The agreement has already been signed.");
-        setReservationSummary((current) => ({
-          ...current,
-          signingStatus: currentStatus.status ?? current?.signingStatus,
-          signedDocumentUrl: currentStatus.signedDocumentUrl ?? current?.signedDocumentUrl ?? null,
-          status: currentStatus.status === "COMPLETED" ? "CONFIRMED" : current?.status,
-        }));
-        return;
-      }
-
-      if (isSafeEmbeddedSigningUrl(currentStatus.embedUrl)) {
-        setSignNowMode(currentStatus.mode);
-        setSignNowEmbedUrl(currentStatus.embedUrl ?? "");
-        setSignNowMessage(currentStatus.message ?? "Continue with the embedded OpenSign agreement below.");
-        return;
-      }
-
-      if (currentStatus.embedUrl) {
-        setSignNowMode("placeholder");
-        setSignNowEmbedUrl("");
-        setSignNowMessage("OpenSign returned a non-document URL, so the setup screen was blocked instead of being shown to your customer.");
-        return;
-      }
-
-      const created = await requestJson<OpenSignSigningResponse>("/api/opensign/create-signing-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reservationPublicId: publicId }),
-      });
-
-      if (isSafeEmbeddedSigningUrl(created.embedUrl)) {
-        setSignNowMode(created.mode);
-        setSignNowEmbedUrl(created.embedUrl ?? "");
-        setSignNowMessage(created.message ?? "");
-        if (created.reservation) {
-          setReservationSummary(normalizeReservationSummary(created.reservation));
-        } else {
-          setReservationSummary((current) => current ? {
-            ...current,
-            signingStatus: created.status ?? current.signingStatus,
-          } : current);
-        }
-        return;
-      }
-
-      setSignNowMode("placeholder");
-      setSignNowEmbedUrl("");
-      setSignNowMessage(created.message ?? "OpenSign did not return a signer-specific document URL.");
+      setAgreementPreviewUrl(currentStatus.previewDocumentUrl ?? currentStatus.signedDocumentUrl ?? "");
+      setSignNowMessage(currentStatus.message ?? "");
+      setReservationSummary((current) => current ? {
+        ...current,
+        signingStatus: currentStatus.status ?? current.signingStatus,
+        signedDocumentUrl: currentStatus.signedDocumentUrl ?? current.signedDocumentUrl ?? null,
+        status: currentStatus.status === "COMPLETED" ? "CONFIRMED" : current.status,
+      } : current);
     } catch (error) {
-      setSignNowMessage(error instanceof Error ? error.message : "Could not prepare the OpenSign signing session.");
+      setSignNowMessage(error instanceof Error ? error.message : "Could not load the agreement preview.");
     } finally {
       setSignNowLoading(false);
     }
   }
 
+  function clearSignaturePad() {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) {
+      return;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    context.fillStyle = "#fffdf8";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.strokeStyle = "#2d4a39";
+    context.lineWidth = 2.5;
+    context.lineCap = "round";
+    context.lineJoin = "round";
+    setSignatureHasInk(false);
+  }
+
   useEffect(() => {
-    if (
-      location.pathname !== "/reserve/sign" ||
-      !reservationIdFromUrl ||
-      signNowMode !== "live" ||
-      reservationSummary?.signingStatus === "COMPLETED"
-    ) {
+    if (location.pathname === "/reserve/sign") {
+      clearSignaturePad();
+    }
+  }, [location.pathname]);
+
+  function getSignatureCanvasPoint(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current;
+    if (!canvas) {
+      return null;
+    }
+    const bounds = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / bounds.width;
+    const scaleY = canvas.height / bounds.height;
+    return {
+      x: (event.clientX - bounds.left) * scaleX,
+      y: (event.clientY - bounds.top) * scaleY,
+    };
+  }
+
+  function startSignatureStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+    const canvas = signatureCanvasRef.current;
+    const point = getSignatureCanvasPoint(event);
+    if (!canvas || !point) {
+      return;
+    }
+    canvas.setPointerCapture(event.pointerId);
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    signatureDrawingRef.current = true;
+    signatureLastPointRef.current = point;
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+  }
+
+  function moveSignatureStroke(event: React.PointerEvent<HTMLCanvasElement>) {
+    if (!signatureDrawingRef.current) {
+      return;
+    }
+    const canvas = signatureCanvasRef.current;
+    const point = getSignatureCanvasPoint(event);
+    if (!canvas || !point) {
+      return;
+    }
+    const context = canvas.getContext("2d");
+    if (!context) {
+      return;
+    }
+    const previous = signatureLastPointRef.current ?? point;
+    context.beginPath();
+    context.moveTo(previous.x, previous.y);
+    context.lineTo(point.x, point.y);
+    context.stroke();
+    signatureLastPointRef.current = point;
+    setSignatureHasInk(true);
+  }
+
+  function endSignatureStroke() {
+    signatureDrawingRef.current = false;
+    signatureLastPointRef.current = null;
+  }
+
+  async function submitSimpleSignature() {
+    if (!reservationIdFromUrl) {
+      return;
+    }
+    const canvas = signatureCanvasRef.current;
+    if (!canvas || !signatureHasInk) {
+      setSignNowMessage("Draw your signature before applying it to the agreement.");
       return;
     }
 
-    let cancelled = false;
-    let timeoutId: number | null = null;
+    try {
+      setSignatureSubmitting(true);
+      const signed = await requestJson<SimpleSigningResponse>("/api/opensign/simple-sign", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          reservationPublicId: reservationIdFromUrl,
+          signatureDataUrl: canvas.toDataURL("image/png"),
+        }),
+      });
 
-    const scheduleNext = (delayMs: number) => {
-      if (cancelled) {
-        return;
-      }
-      timeoutId = window.setTimeout(() => {
-        void pollStatus();
-      }, delayMs);
-    };
-
-    const pollStatus = async () => {
-      if (cancelled || signNowStatusPollInFlightRef.current) {
-        scheduleNext(15000);
-        return;
-      }
-
-      if (document.visibilityState === "hidden") {
-        scheduleNext(20000);
-        return;
-      }
-
-      signNowStatusPollInFlightRef.current = true;
-
-      try {
-        const status = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(reservationIdFromUrl)}`, {
-          cache: "no-store",
-        });
-
+      setAgreementPreviewUrl(signed.previewDocumentUrl ?? signed.signedDocumentUrl ?? "");
+      setSignNowMessage(signed.message ?? "Agreement signed.");
+      if (signed.reservation) {
+        setReservationSummary(normalizeReservationSummary(signed.reservation));
+      } else {
         setReservationSummary((current) => current ? {
           ...current,
-          signingStatus: status.status ?? current.signingStatus,
-          signedDocumentUrl: status.signedDocumentUrl ?? current.signedDocumentUrl ?? null,
-          status: status.status === "COMPLETED" ? "CONFIRMED" : current.status,
+          signingStatus: signed.status ?? current.signingStatus,
+          signedDocumentUrl: signed.signedDocumentUrl ?? current.signedDocumentUrl ?? null,
+          status: signed.status === "COMPLETED" ? "CONFIRMED" : current.status,
         } : current);
-
-        if (status.status === "COMPLETED") {
-          setSignNowMessage("Agreement completed. Continue to payment when you're ready.");
-          return;
-        }
-      } catch {
-        // Ignore transient polling failures while the embedded signer is open.
-      } finally {
-        signNowStatusPollInFlightRef.current = false;
       }
-
-      scheduleNext(15000);
-    };
-
-    scheduleNext(15000);
-
-    return () => {
-      cancelled = true;
-      if (timeoutId != null) {
-        window.clearTimeout(timeoutId);
-      }
-    };
-  }, [location.pathname, reservationIdFromUrl, reservationSummary?.signingStatus, signNowMode]);
+      clearSignaturePad();
+    } catch (error) {
+      setSignNowMessage(error instanceof Error ? error.message : "Could not sign the agreement.");
+    } finally {
+      setSignatureSubmitting(false);
+    }
+  }
 
   function updateField<Key extends keyof ReservationDraft>(field: Key, value: ReservationDraft[Key]) {
     setDraft((current) => ({ ...current, [field]: value }));
@@ -1100,9 +1118,9 @@ function ReservationFlow() {
     setCheckoutPublishableKey("");
     setCheckoutMode("");
     setPaymentStatusMessage("");
-    setSignNowMode("");
-    setSignNowEmbedUrl("");
+    setAgreementPreviewUrl("");
     setSignNowMessage("");
+    setSignatureHasInk(false);
     navigate("/reserve/package");
   }
 
@@ -1477,34 +1495,55 @@ function ReservationFlow() {
                 </div>
               </div>
               <div className="mt-6 rounded-[1.5rem] bg-sky p-4">
-                  {reservationSummary?.signingStatus === "COMPLETED" ? (
-                    <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
-                      <h3 className="font-display text-2xl text-soil">Agreement completed</h3>
-                      <p className="mt-3 text-slate-700">
-                        The agreement is already signed. OpenSign should have recorded the completion, and you can also open the saved document from the link here.
-                      </p>
-                    </div>
-                  ) : signNowMode === "live" && signNowEmbedUrl ? (
-                    <div className="overflow-hidden rounded-[1.5rem] border border-black/5 bg-white shadow-card">
+                  {agreementPreviewUrl ? (
+                    <div className="rounded-[1.5rem] bg-white p-3 shadow-card">
                       <iframe
-                        title="OpenSign agreement signing"
-                        src={signNowEmbedUrl}
-                        className="min-h-[1040px] w-full"
+                        title="Agreement PDF preview"
+                        src={agreementPreviewUrl}
+                        className="min-h-[1040px] w-full rounded-[1rem]"
                       />
                     </div>
-                  ) : signNowMode === "placeholder" ? (
+                  ) : signNowLoading ? (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
-                      <h3 className="font-display text-2xl text-soil">Signing session unavailable</h3>
-                      <p className="mt-3 text-slate-700">
-                        The app could not get a signer-specific agreement URL from OpenSign, so the setup or home screen was blocked instead of being shown to customers. Check the OpenSign API key, template ID, and template signer role.
-                      </p>
+                      <p className="text-slate-600">Preparing your agreement preview...</p>
                     </div>
                   ) : (
                     <div className="rounded-[1.5rem] bg-white p-6 shadow-card">
-                      <p className="text-slate-600">{signNowLoading ? "Preparing your agreement..." : "Loading the signing experience..."}</p>
+                      <p className="text-slate-600">The agreement preview is not ready yet.</p>
                     </div>
                   )}
               </div>
+              {reservationSummary?.signingStatus !== "COMPLETED" && (
+                <div className="mt-6 rounded-[1.5rem] bg-white p-6 shadow-card">
+                  <h3 className="font-display text-2xl text-soil">Add your signature</h3>
+                  <p className="mt-3 text-slate-700">
+                    Sign once below. Tonka Time will place your signature and today&apos;s date on the agreement, then show you the completed PDF for review and download.
+                  </p>
+                  <canvas
+                    ref={signatureCanvasRef}
+                    width={900}
+                    height={240}
+                    onPointerDown={startSignatureStroke}
+                    onPointerMove={moveSignatureStroke}
+                    onPointerUp={endSignatureStroke}
+                    onPointerLeave={endSignatureStroke}
+                    className="mt-5 h-56 w-full touch-none rounded-[1.25rem] border border-black/10 bg-[#fffdf8]"
+                  />
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    <button type="button" onClick={clearSignaturePad} className="rounded-full border border-soil px-5 py-3 font-semibold text-soil">
+                      Clear signature
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void submitSimpleSignature()}
+                      disabled={!signatureHasInk || signatureSubmitting}
+                      className="rounded-full bg-soil px-5 py-3 font-semibold text-white disabled:opacity-60"
+                    >
+                      {signatureSubmitting ? "Applying signature..." : "Sign agreement"}
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="mt-6">
                 <button
                   type="button"
