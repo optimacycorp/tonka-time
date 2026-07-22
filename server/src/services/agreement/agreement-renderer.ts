@@ -58,11 +58,20 @@ export async function renderUnsignedAgreement(
   const outputDebugPdfPath = path.join(outputDirectory, `${reservation.publicId}-unsigned-debug.pdf`);
   const outputAnchorDataPath = path.join(outputDirectory, `${reservation.publicId}-anchor-layout.json`);
   const outputDataPath = path.join(outputDirectory, `${reservation.publicId}-agreement-data.json`);
+  const outputManifestPath = path.join(outputDirectory, `${reservation.publicId}-agreement-manifest.json`);
 
   const fingerprint = createHash("sha256")
     .update(templateBuffer)
     .update(JSON.stringify({ agreementData, force: options?.force === true }))
     .digest("hex");
+
+  if (options?.force !== true) {
+    const cached = await readCachedGeneratedAgreement(outputManifestPath, fingerprint, templateVersion);
+    if (cached) {
+      return cached;
+    }
+  }
+
   const sourceXmlTexts = await readDocxXmlTexts(templatePath);
   const sourceAnchorValidation = validateAgreementAnchors(sourceXmlTexts);
 
@@ -113,7 +122,7 @@ export async function renderUnsignedAgreement(
     widgetRects,
   });
 
-  return {
+  const generated: GeneratedAgreement = {
     reservationId: reservation.id,
     templatePath,
     templateVersion,
@@ -138,6 +147,9 @@ export async function renderUnsignedAgreement(
     pdfPageCount,
     renderMode: "docx_pdf",
   };
+
+  await writeFile(outputManifestPath, JSON.stringify(generated, null, 2), "utf8");
+  return generated;
 }
 
 function buildAgreementTemplateVersion(templatePath: string, templateSha256: string) {
@@ -271,6 +283,42 @@ async function countPdfPages(pdfPath: string) {
     throw new Error(`Could not determine PDF page count for ${pdfPath}`);
   }
   return parsed;
+}
+
+async function readCachedGeneratedAgreement(
+  manifestPath: string,
+  fingerprint: string,
+  templateVersion: string,
+): Promise<GeneratedAgreement | null> {
+  try {
+    const parsed = JSON.parse(await readFile(manifestPath, "utf8")) as Partial<GeneratedAgreement>;
+    if (
+      parsed.sha256 !== fingerprint ||
+      parsed.templateVersion !== templateVersion ||
+      parsed.renderMode !== "docx_pdf" ||
+      typeof parsed.outputPdfPath !== "string" ||
+      typeof parsed.outputMaskedPdfPath !== "string" ||
+      typeof parsed.outputDebugPdfPath !== "string" ||
+      typeof parsed.outputAnchorDataPath !== "string" ||
+      typeof parsed.outputDocxPath !== "string" ||
+      typeof parsed.outputDataPath !== "string"
+    ) {
+      return null;
+    }
+
+    await Promise.all([
+      access(parsed.outputPdfPath),
+      access(parsed.outputMaskedPdfPath),
+      access(parsed.outputDebugPdfPath),
+      access(parsed.outputAnchorDataPath),
+      access(parsed.outputDocxPath),
+      access(parsed.outputDataPath),
+    ]);
+
+    return parsed as GeneratedAgreement;
+  } catch {
+    return null;
+  }
 }
 
 async function normalizePdfForOpenSign(pdfPath: string) {

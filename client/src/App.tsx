@@ -568,6 +568,7 @@ function ReservationFlow() {
   const [signNowEmbedUrl, setSignNowEmbedUrl] = useState("");
   const [signNowLoading, setSignNowLoading] = useState(false);
   const [signNowMessage, setSignNowMessage] = useState("");
+  const signNowStatusPollInFlightRef = useRef(false);
   const currentStepIndex = reservationSteps.findIndex((step) => step.path === location.pathname);
   const reservationQueryParam = searchParams.get("reservation");
   const checkoutSessionId = searchParams.get("session_id");
@@ -916,33 +917,74 @@ function ReservationFlow() {
   }
 
   useEffect(() => {
-    if (location.pathname !== "/reserve/sign" || !reservationIdFromUrl || signNowMode !== "live") {
+    if (
+      location.pathname !== "/reserve/sign" ||
+      !reservationIdFromUrl ||
+      signNowMode !== "live" ||
+      reservationSummary?.signingStatus === "COMPLETED"
+    ) {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
-      void requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(reservationIdFromUrl)}`, {
-        cache: "no-store",
-      })
-        .then((status) => {
-          setReservationSummary((current) => current ? {
-            ...current,
-            signingStatus: status.status ?? current.signingStatus,
-            signedDocumentUrl: status.signedDocumentUrl ?? current.signedDocumentUrl ?? null,
-            status: status.status === "COMPLETED" ? "CONFIRMED" : current.status,
-          } : current);
+    let cancelled = false;
+    let timeoutId: number | null = null;
 
-          if (status.status === "COMPLETED") {
-            setSignNowMessage("Agreement completed. Continue to payment when you're ready.");
-          }
-        })
-        .catch(() => {
-          // Ignore transient polling failures while the embedded signer is open.
+    const scheduleNext = (delayMs: number) => {
+      if (cancelled) {
+        return;
+      }
+      timeoutId = window.setTimeout(() => {
+        void pollStatus();
+      }, delayMs);
+    };
+
+    const pollStatus = async () => {
+      if (cancelled || signNowStatusPollInFlightRef.current) {
+        scheduleNext(15000);
+        return;
+      }
+
+      if (document.visibilityState === "hidden") {
+        scheduleNext(20000);
+        return;
+      }
+
+      signNowStatusPollInFlightRef.current = true;
+
+      try {
+        const status = await requestJson<OpenSignSigningResponse>(`/api/opensign/signing-session-status?reservationPublicId=${encodeURIComponent(reservationIdFromUrl)}`, {
+          cache: "no-store",
         });
-    }, 5000);
 
-    return () => window.clearInterval(intervalId);
-  }, [location.pathname, reservationIdFromUrl, signNowMode]);
+        setReservationSummary((current) => current ? {
+          ...current,
+          signingStatus: status.status ?? current.signingStatus,
+          signedDocumentUrl: status.signedDocumentUrl ?? current.signedDocumentUrl ?? null,
+          status: status.status === "COMPLETED" ? "CONFIRMED" : current.status,
+        } : current);
+
+        if (status.status === "COMPLETED") {
+          setSignNowMessage("Agreement completed. Continue to payment when you're ready.");
+          return;
+        }
+      } catch {
+        // Ignore transient polling failures while the embedded signer is open.
+      } finally {
+        signNowStatusPollInFlightRef.current = false;
+      }
+
+      scheduleNext(15000);
+    };
+
+    scheduleNext(15000);
+
+    return () => {
+      cancelled = true;
+      if (timeoutId != null) {
+        window.clearTimeout(timeoutId);
+      }
+    };
+  }, [location.pathname, reservationIdFromUrl, reservationSummary?.signingStatus, signNowMode]);
 
   function updateField<Key extends keyof ReservationDraft>(field: Key, value: ReservationDraft[Key]) {
     setDraft((current) => ({ ...current, [field]: value }));

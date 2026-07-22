@@ -29,8 +29,13 @@ type OpenSignFlags = {
   sessionId?: string | null;
   tenantId?: string | null;
   createdAt?: string | null;
+  syncedAt?: string | null;
+  lastStatusCheckAt?: string | null;
+  lastKnownStatus?: string | null;
   debug?: Prisma.InputJsonValue | null;
 };
+
+const openSignStatusSyncMinIntervalMs = 15000;
 
 type OpenSignLiveSession = {
   sessionId: string;
@@ -409,6 +414,11 @@ async function syncOpenSignReservationStatus(publicId: string) {
     return reservation;
   }
 
+  const existingFlags = getLegacySigningFlags(reservation.internalFlags);
+  if (shouldSkipOpenSignStatusSync(existingFlags)) {
+    return reservation;
+  }
+
   try {
     const sessionToken = await loginOpenSignAdmin();
     const document = await fetchJson(`${getOpenSignApiBase()}/functions/getDocument`, {
@@ -439,7 +449,19 @@ async function syncOpenSignReservationStatus(publicId: string) {
     ]);
 
     if (isCompleted !== true) {
-      return reservation;
+      return prisma.reservation.update({
+        where: { publicId },
+        data: {
+          internalFlags: {
+            ...getLegacyFlagsObject(reservation.internalFlags),
+            opensign: {
+              ...existingFlags,
+              lastStatusCheckAt: new Date().toISOString(),
+              lastKnownStatus: reservation.docusealStatus ?? "SENT",
+            },
+          },
+        },
+      });
     }
 
     return prisma.reservation.update({
@@ -452,8 +474,10 @@ async function syncOpenSignReservationStatus(publicId: string) {
         internalFlags: {
           ...getLegacyFlagsObject(reservation.internalFlags),
           opensign: {
-            ...getLegacySigningFlags(reservation.internalFlags),
+            ...existingFlags,
             syncedAt: new Date().toISOString(),
+            lastStatusCheckAt: new Date().toISOString(),
+            lastKnownStatus: "COMPLETED",
             completionDetectedBy: "getDocument",
           },
         },
@@ -1619,6 +1643,20 @@ function getLegacySigningFlags(flags: unknown): OpenSignFlags {
   }
 
   return { embedUrl: null };
+}
+
+function shouldSkipOpenSignStatusSync(flags: OpenSignFlags) {
+  const rawTimestamp = flags.lastStatusCheckAt ?? flags.syncedAt ?? null;
+  if (!rawTimestamp) {
+    return false;
+  }
+
+  const parsed = Date.parse(rawTimestamp);
+  if (!Number.isFinite(parsed)) {
+    return false;
+  }
+
+  return Date.now() - parsed < openSignStatusSyncMinIntervalMs;
 }
 
 export default router;
