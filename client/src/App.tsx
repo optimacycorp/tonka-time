@@ -1927,7 +1927,12 @@ function tutorialLabel(key: string) {
 }
 
 function getWeekendEnd(startDate: string) {
-  const date = new Date(`${startDate}T00:00:00`);
+  const dateOnly = toDateOnlyValue(startDate);
+  if (!dateOnly) {
+    return "";
+  }
+
+  const date = new Date(`${dateOnly}T00:00:00`);
   date.setDate(date.getDate() + 3);
   return date.toISOString().slice(0, 10);
 }
@@ -1950,7 +1955,12 @@ function getUpcomingFridays(count: number) {
 }
 
 function formatFridayLabel(startDate: string) {
-  return new Date(`${startDate}T00:00:00`).toLocaleDateString("en-US", {
+  const dateOnly = toDateOnlyValue(startDate);
+  if (!dateOnly) {
+    return "Date unavailable";
+  }
+
+  return new Date(`${dateOnly}T00:00:00`).toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -1959,7 +1969,12 @@ function formatFridayLabel(startDate: string) {
 }
 
 function formatMondayLabel(endDate: string) {
-  return new Date(`${endDate}T00:00:00`).toLocaleDateString("en-US", {
+  const dateOnly = toDateOnlyValue(endDate);
+  if (!dateOnly) {
+    return "Date unavailable";
+  }
+
+  return new Date(`${dateOnly}T00:00:00`).toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -1981,6 +1996,20 @@ function buildMapEmbedUrl(lat?: number, lon?: number) {
   return `https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${lat.toFixed(6)}%2C${lon.toFixed(6)}`;
 }
 
+function toDateOnlyValue(value: string | null | undefined) {
+  if (!value) {
+    return "";
+  }
+
+  const dateOnly = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? "";
+  if (!dateOnly) {
+    return "";
+  }
+
+  const parsed = new Date(`${dateOnly}T00:00:00`);
+  return Number.isNaN(parsed.getTime()) ? "" : dateOnly;
+}
+
 function hydrateDraftFromReservation(current: ReservationDraft, summary: ReservationSummary) {
   const storedChecklist = summary.checklistJson?.checklist ?? {};
   const storedTutorial = summary.checklistJson?.tutorialAcknowledgement ?? {};
@@ -1998,7 +2027,7 @@ function hydrateDraftFromReservation(current: ReservationDraft, summary: Reserva
     lastName: summary.lastName ?? current.lastName,
     email: summary.email ?? current.email,
     phone: summary.phone ?? current.phone,
-    weekendStartDate: summary.weekendStartDate ?? current.weekendStartDate,
+    weekendStartDate: toDateOnlyValue(summary.weekendStartDate) || current.weekendStartDate,
     jobsiteStreet: summary.jobsiteStreet ?? current.jobsiteStreet,
     jobsiteCity: summary.jobsiteCity ?? current.jobsiteCity,
     jobsiteState: summary.jobsiteState ?? current.jobsiteState,
